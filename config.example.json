@@ -1,0 +1,12 @@
+{
+  "base_url": "https://efb-kit.martin-starman.com",
+  "token": "",
+  "refresh_seconds": 60,
+  "include_done": false,
+  "popup_width": 380,
+  "margin_top": 18,
+  "margin_right": 18,
+  "gap": 10,
+  "max_visible": 12,
+  "verify_tls": true
+}

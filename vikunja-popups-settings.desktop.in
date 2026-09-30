@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vikunja Popups Settings
+Comment=Configure the Vikunja task popups
+Exec=@APP_DIR@/.venv/bin/python @APP_DIR@/settings.py
+Icon=preferences-system
+Categories=Utility;
+Terminal=false
+StartupWMClass=vikunja-popups-settings

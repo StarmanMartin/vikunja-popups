@@ -1,0 +1,16 @@
+[Unit]
+Description=Vikunja desktop task popups
+# Start with the desktop session so DISPLAY/WAYLAND_DISPLAY and
+# XDG_CURRENT_DESKTOP are available, and stop when it ends.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/vikunja-popups/.venv/bin/python %h/.local/share/vikunja-popups/app.py
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
