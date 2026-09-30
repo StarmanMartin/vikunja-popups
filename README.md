@@ -57,7 +57,8 @@ Example:
   "margin_right": 18,
   "gap": 10,
   "max_visible": 12,
-  "verify_tls": true
+  "verify_tls": true,
+  "ai_model": ""
 }
 ```
 
@@ -129,6 +130,10 @@ Restarting the application clears all dismissals.
 - `max_visible`: maximum number of task cards shown at once, per project.
 - `verify_tls`: set to `false` only for development/self-signed setups where
   you intentionally do not want certificate verification.
+- `ai_model`: an [opencode](https://opencode.ai) model id in the form
+  `provider/model`, or empty for none. The settings app offers every model
+  that `opencode models` lists. It is stored for upcoming AI features and not
+  used yet.
 
 ## Remove
 

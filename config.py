@@ -22,6 +22,7 @@ class Config:
     gap: int = 10
     max_visible: int = 12
     verify_tls: bool = True
+    ai_model: str = ""
 
 
 EXAMPLE = {
@@ -35,6 +36,7 @@ EXAMPLE = {
     "gap": 10,
     "max_visible": 12,
     "verify_tls": True,
+    "ai_model": "",
 }
 
 
@@ -93,4 +95,5 @@ def load_config() -> Config:
         gap=max(0, int(data.get("gap", 10))),
         max_visible=max(1, int(data.get("max_visible", 12))),
         verify_tls=bool(data.get("verify_tls", True)),
+        ai_model=str(data.get("ai_model") or "").strip(),
     )

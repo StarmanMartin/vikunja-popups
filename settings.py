@@ -11,6 +11,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk  # type: ignore  # noqa: E402
 
 from config import CONFIG_FILE, EXAMPLE, read_raw_config, save_raw_config
+from opencode_models import list_models
 from vikunja_client import VikunjaClient
 
 
@@ -71,6 +72,20 @@ class SettingsWindow(Gtk.Window):
             note.get_style_context().add_class("dim-label")
             grid.attach(note, 1, row, 1, 1)
             row += 1
+
+        # The entry keeps the saved model usable when opencode is unavailable.
+        self.ai_model = Gtk.ComboBoxText.new_with_entry()
+        self.ai_model.set_hexpand(True)
+        ai_entry = self.ai_model.get_child()
+        ai_entry.set_placeholder_text("None")
+        ai_entry.set_text(str(self.data.get("ai_model") or ""))
+        row = self._add_row(grid, row, "AI model", self.ai_model)
+
+        self.ai_note = Gtk.Label(label="Loading models from opencode...", xalign=0, wrap=True)
+        self.ai_note.get_style_context().add_class("dim-label")
+        grid.attach(self.ai_note, 1, row, 1, 1)
+        row += 1
+        threading.Thread(target=self._models_worker, daemon=True).start()
 
         self.spins: dict[str, Gtk.SpinButton] = {}
         for key, label, lower in NUMBER_FIELDS:
@@ -133,6 +148,7 @@ class SettingsWindow(Gtk.Window):
         values = {
             "base_url": self.base_url.get_text().strip(),
             "token": self.token.get_text().strip(),
+            "ai_model": self.ai_model.get_child().get_text().strip(),
         }
         for key, spin in self.spins.items():
             values[key] = spin.get_value_as_int()
@@ -146,6 +162,26 @@ class SettingsWindow(Gtk.Window):
             self.base_url.grab_focus()
             return False
         return True
+
+    # --- AI models ----------------------------------------------------------
+    def _models_worker(self) -> None:
+        # Runs in a thread: no GTK calls here.
+        try:
+            models, error = list_models(), None
+        except RuntimeError as exc:
+            models, error = [], str(exc)
+        GLib.idle_add(self._models_done, models, error)
+
+    def _models_done(self, models: list[str], error: str | None) -> bool:
+        for model in models:
+            self.ai_model.append_text(model)
+        if error:
+            self.ai_note.set_text(f"{error}. You can still type a provider/model id.")
+        elif not models:
+            self.ai_note.set_text("opencode lists no models. You can still type a provider/model id.")
+        else:
+            self.ai_note.set_text(f"{len(models)} models from opencode. Leave empty for none.")
+        return False
 
     # --- Test connection ----------------------------------------------------
     def _on_test(self, _button: Gtk.Button) -> None:

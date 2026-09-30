@@ -14,7 +14,7 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 DESKTOP_FILE="${APP_NAME}-settings.desktop"
 
-APP_FILES=(app.py config.py settings.py vikunja_client.py requirements.txt)
+APP_FILES=(app.py config.py opencode_models.py settings.py vikunja_client.py requirements.txt)
 
 if [[ "${EUID}" -eq 0 ]]; then
   echo "Run this script as your normal user, not with sudo." >&2

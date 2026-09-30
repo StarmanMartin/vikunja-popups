@@ -8,5 +8,6 @@
   "margin_right": 18,
   "gap": 10,
   "max_visible": 12,
-  "verify_tls": true
+  "verify_tls": true,
+  "ai_model": ""
 }
