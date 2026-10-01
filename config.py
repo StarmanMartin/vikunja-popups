@@ -10,6 +10,22 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
+EMAIL_SECURITY = ("ssl", "starttls", "none")
+
+
+@dataclass(frozen=True)
+class EmailConfig:
+    address: str = ""
+    username: str = ""
+    password: str = ""
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_security: str = "ssl"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_security: str = "starttls"
+
+
 @dataclass(frozen=True)
 class Config:
     base_url: str
@@ -23,6 +39,7 @@ class Config:
     max_visible: int = 12
     verify_tls: bool = True
     ai_model: str = ""
+    email: EmailConfig = EmailConfig()
 
 
 EXAMPLE = {
@@ -37,6 +54,17 @@ EXAMPLE = {
     "max_visible": 12,
     "verify_tls": True,
     "ai_model": "",
+    "email": {
+        "address": "",
+        "username": "",
+        "password": "",
+        "imap_host": "",
+        "imap_port": 993,
+        "imap_security": "ssl",
+        "smtp_host": "",
+        "smtp_port": 587,
+        "smtp_security": "starttls",
+    },
 }
 
 
@@ -70,6 +98,34 @@ def save_raw_config(data: dict) -> None:
     os.replace(tmp, CONFIG_FILE)
 
 
+def normalize_email(raw: object) -> dict:
+    """The `email` section with defaults filled in and bad values replaced.
+
+    Lenient on purpose: a broken email section must not stop the popups.
+    """
+    defaults = EXAMPLE["email"]
+    raw = raw if isinstance(raw, dict) else {}
+    email = {**raw}
+    for key, default in defaults.items():
+        value = raw.get(key, default)
+        if isinstance(default, int):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                value = default
+            if not 1 <= value <= 65535:
+                value = default
+        elif key == "password":
+            value = str(value or "")
+        else:
+            value = str(value or "").strip()
+        email[key] = value
+    for key in ("imap_security", "smtp_security"):
+        if email[key] not in EMAIL_SECURITY:
+            email[key] = defaults[key]
+    return email
+
+
 def load_config() -> Config:
     ensure_example_config()
     data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -96,4 +152,11 @@ def load_config() -> Config:
         max_visible=max(1, int(data.get("max_visible", 12))),
         verify_tls=bool(data.get("verify_tls", True)),
         ai_model=str(data.get("ai_model") or "").strip(),
+        email=EmailConfig(
+            **{
+                key: value
+                for key, value in normalize_email(data.get("email")).items()
+                if key in EXAMPLE["email"]
+            }
+        ),
     )

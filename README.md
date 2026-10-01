@@ -58,7 +58,18 @@ Example:
   "gap": 10,
   "max_visible": 12,
   "verify_tls": true,
-  "ai_model": ""
+  "ai_model": "",
+  "email": {
+    "address": "",
+    "username": "",
+    "password": "",
+    "imap_host": "",
+    "imap_port": 993,
+    "imap_security": "ssl",
+    "smtp_host": "",
+    "smtp_port": 587,
+    "smtp_security": "starttls"
+  }
 }
 ```
 
@@ -134,6 +145,12 @@ Restarting the application clears all dismissals.
   `provider/model`, or empty for none. The settings app offers every model
   that `opencode models` lists. It is stored for upcoming AI features and not
   used yet.
+- `email`: one email account (the "Email" tab of the settings app). `username`
+  may stay empty when it equals `address`. `imap_security` and
+  `smtp_security` are `ssl`, `starttls` or `none`. The password is stored in
+  the config file (mode `0600`), like the API token. "Test login" tries the
+  IMAP and SMTP login without saving. Like `ai_model`, the account is stored
+  for upcoming features and not used yet.
 
 ## Remove
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import imaplib
 import os
+import smtplib
+import ssl
 import subprocess
 import threading
 
@@ -10,7 +13,13 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import GLib, Gtk  # type: ignore  # noqa: E402
 
-from config import CONFIG_FILE, EXAMPLE, read_raw_config, save_raw_config
+from config import (
+    CONFIG_FILE,
+    EXAMPLE,
+    normalize_email,
+    read_raw_config,
+    save_raw_config,
+)
 from opencode_models import list_models
 from vikunja_client import VikunjaClient
 
@@ -33,6 +42,76 @@ SWITCH_FIELDS = (
 )
 
 
+EMAIL_TEXT_FIELDS = (
+    ("address", "Email address", ""),
+    ("username", "Username", "Same as the email address"),
+)
+# prefix, label
+EMAIL_SERVERS = (
+    ("imap", "IMAP (incoming)"),
+    ("smtp", "SMTP (outgoing)"),
+)
+EMAIL_SECURITY_LABELS = (
+    ("ssl", "SSL/TLS"),
+    ("starttls", "STARTTLS"),
+    ("none", "None"),
+)
+EMAIL_TIMEOUT = 15
+
+
+def test_email_login(email: dict) -> str:
+    """Log in to the configured IMAP and SMTP servers. Blocking."""
+    user = email["username"] or email["address"]
+    context = ssl.create_default_context()
+    checked = []
+
+    if email["imap_host"]:
+        try:
+            if email["imap_security"] == "ssl":
+                imap = imaplib.IMAP4_SSL(
+                    email["imap_host"],
+                    email["imap_port"],
+                    ssl_context=context,
+                    timeout=EMAIL_TIMEOUT,
+                )
+            else:
+                imap = imaplib.IMAP4(
+                    email["imap_host"], email["imap_port"], timeout=EMAIL_TIMEOUT
+                )
+            with imap:
+                if email["imap_security"] == "starttls":
+                    imap.starttls(ssl_context=context)
+                imap.login(user, email["password"])
+        except Exception as exc:
+            raise RuntimeError(f"IMAP login failed: {exc}") from exc
+        checked.append("IMAP")
+
+    if email["smtp_host"]:
+        try:
+            if email["smtp_security"] == "ssl":
+                smtp = smtplib.SMTP_SSL(
+                    email["smtp_host"],
+                    email["smtp_port"],
+                    context=context,
+                    timeout=EMAIL_TIMEOUT,
+                )
+            else:
+                smtp = smtplib.SMTP(
+                    email["smtp_host"], email["smtp_port"], timeout=EMAIL_TIMEOUT
+                )
+            with smtp:
+                if email["smtp_security"] == "starttls":
+                    smtp.starttls(context=context)
+                smtp.login(user, email["password"])
+        except Exception as exc:
+            raise RuntimeError(f"SMTP login failed: {exc}") from exc
+        checked.append("SMTP")
+
+    if not checked:
+        raise RuntimeError("Enter an IMAP or SMTP server.")
+    return f"Email login OK ({' and '.join(checked)})."
+
+
 class SettingsWindow(Gtk.Window):
     def __init__(self) -> None:
         super().__init__(title="Vikunja Popups Settings")
@@ -44,7 +123,7 @@ class SettingsWindow(Gtk.Window):
         self.data = read_raw_config()
         self.testing = False
 
-        grid = Gtk.Grid(column_spacing=12, row_spacing=10)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=10, border_width=14)
         row = 0
 
         self.base_url = Gtk.Entry(hexpand=True)
@@ -52,15 +131,7 @@ class SettingsWindow(Gtk.Window):
         self.base_url.set_text(str(self.data.get("base_url", "")))
         row = self._add_row(grid, row, "Vikunja URL", self.base_url)
 
-        self.token = Gtk.Entry(hexpand=True)
-        self.token.set_visibility(False)
-        self.token.set_input_purpose(Gtk.InputPurpose.PASSWORD)
-        self.token.set_icon_from_icon_name(
-            Gtk.EntryIconPosition.SECONDARY, "view-reveal-symbolic"
-        )
-        self.token.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, "Show or hide")
-        self.token.connect("icon-press", self._on_token_icon)
-        self.token.set_text(str(self.data.get("token", "")))
+        self.token = self._secret_entry(str(self.data.get("token", "")))
         row = self._add_row(grid, row, "API token", self.token)
 
         if os.environ.get("VIKUNJA_TOKEN"):
@@ -81,7 +152,9 @@ class SettingsWindow(Gtk.Window):
         ai_entry.set_text(str(self.data.get("ai_model") or ""))
         row = self._add_row(grid, row, "AI model", self.ai_model)
 
-        self.ai_note = Gtk.Label(label="Loading models from opencode...", xalign=0, wrap=True)
+        self.ai_note = Gtk.Label(
+            label="Loading models from opencode...", xalign=0, wrap=True, max_width_chars=60
+        )
         self.ai_note.get_style_context().add_class("dim-label")
         grid.attach(self.ai_note, 1, row, 1, 1)
         row += 1
@@ -102,7 +175,8 @@ class SettingsWindow(Gtk.Window):
             self.switches[key] = switch
             row = self._add_row(grid, row, label, switch)
 
-        self.status = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        # max_width_chars keeps a long message from widening the window.
+        self.status = Gtk.Label(xalign=0, wrap=True, selectable=True, max_width_chars=60)
         self.status.set_text(str(CONFIG_FILE))
         self.status.get_style_context().add_class("dim-label")
 
@@ -119,8 +193,12 @@ class SettingsWindow(Gtk.Window):
         buttons.pack_end(save_button, False, False, 0)
         buttons.pack_end(close_button, False, False, 0)
 
+        notebook = Gtk.Notebook()
+        notebook.append_page(grid, Gtk.Label(label="General"))
+        notebook.append_page(self._build_email_page(), Gtk.Label(label="Email"))
+
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        box.pack_start(grid, True, True, 0)
+        box.pack_start(notebook, True, True, 0)
         box.pack_start(self.status, False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
@@ -138,8 +216,79 @@ class SettingsWindow(Gtk.Window):
         except (TypeError, ValueError):
             return max(lower, EXAMPLE[key])
 
-    def _on_token_icon(self, entry: Gtk.Entry, *_args) -> None:
-        entry.set_visibility(not entry.get_visibility())
+    @staticmethod
+    def _secret_entry(text: str) -> Gtk.Entry:
+        entry = Gtk.Entry(hexpand=True)
+        entry.set_visibility(False)
+        entry.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+        entry.set_icon_from_icon_name(
+            Gtk.EntryIconPosition.SECONDARY, "view-reveal-symbolic"
+        )
+        entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, "Show or hide")
+        entry.connect(
+            "icon-press", lambda e, *_args: e.set_visibility(not e.get_visibility())
+        )
+        entry.set_text(text)
+        return entry
+
+    def _build_email_page(self) -> Gtk.Grid:
+        # One account only, stored as the "email" object of the config.
+        email = normalize_email(self.data.get("email"))
+        grid = Gtk.Grid(column_spacing=12, row_spacing=10, border_width=14)
+        row = 0
+
+        self.email_entries: dict[str, Gtk.Entry] = {}
+        for key, label, placeholder in EMAIL_TEXT_FIELDS:
+            entry = Gtk.Entry(hexpand=True)
+            entry.set_placeholder_text(placeholder)
+            entry.set_text(email[key])
+            self.email_entries[key] = entry
+            row = self._add_row(grid, row, label, entry)
+
+        self.email_entries["password"] = self._secret_entry(email["password"])
+        row = self._add_row(grid, row, "Password", self.email_entries["password"])
+
+        self.email_ports: dict[str, Gtk.SpinButton] = {}
+        self.email_security: dict[str, Gtk.ComboBoxText] = {}
+        for prefix, label in EMAIL_SERVERS:
+            host = Gtk.Entry(hexpand=True)
+            host.set_placeholder_text(f"{prefix}.example.com")
+            host.set_text(email[f"{prefix}_host"])
+            self.email_entries[f"{prefix}_host"] = host
+
+            port = Gtk.SpinButton.new_with_range(1, 65535, 1)
+            port.set_value(email[f"{prefix}_port"])
+            self.email_ports[f"{prefix}_port"] = port
+
+            security = Gtk.ComboBoxText()
+            for value, text in EMAIL_SECURITY_LABELS:
+                security.append(value, text)
+            security.set_active_id(email[f"{prefix}_security"])
+            self.email_security[f"{prefix}_security"] = security
+
+            row = self._add_row(grid, row, f"{label} server", host)
+            details = Gtk.Box(spacing=8)
+            details.pack_start(port, False, False, 0)
+            details.pack_start(security, False, False, 0)
+            row = self._add_row(grid, row, "Port and security", details)
+
+        self.email_test_button = Gtk.Button(label="Test login", halign=Gtk.Align.START)
+        self.email_test_button.connect("clicked", self._on_email_test)
+        grid.attach(self.email_test_button, 1, row, 1, 1)
+        return grid
+
+    def _email_values(self) -> dict:
+        # Start from what was read, so keys unknown to this form are kept.
+        raw = self.data.get("email")
+        email = dict(raw) if isinstance(raw, dict) else {}
+        for key, entry in self.email_entries.items():
+            text = entry.get_text()
+            email[key] = text if key == "password" else text.strip()
+        for key, spin in self.email_ports.items():
+            email[key] = spin.get_value_as_int()
+        for key, combo in self.email_security.items():
+            email[key] = combo.get_active_id()
+        return email
 
     def _set_status(self, text: str) -> None:
         self.status.set_text(text)
@@ -149,6 +298,7 @@ class SettingsWindow(Gtk.Window):
             "base_url": self.base_url.get_text().strip(),
             "token": self.token.get_text().strip(),
             "ai_model": self.ai_model.get_child().get_text().strip(),
+            "email": self._email_values(),
         }
         for key, spin in self.spins.items():
             values[key] = spin.get_value_as_int()
@@ -216,6 +366,29 @@ class SettingsWindow(Gtk.Window):
     def _test_done(self, text: str) -> bool:
         self.testing = False
         self.test_button.set_sensitive(True)
+        self._set_status(text)
+        return False
+
+    # --- Test email login ---------------------------------------------------
+    def _on_email_test(self, button: Gtk.Button) -> None:
+        button.set_sensitive(False)
+        self._set_status("Logging in to the mail server...")
+        threading.Thread(
+            target=self._email_test_worker,
+            args=(self._email_values(),),
+            daemon=True,
+        ).start()
+
+    def _email_test_worker(self, email: dict) -> None:
+        # Runs in a thread: no GTK calls here.
+        try:
+            text = test_email_login(email)
+        except RuntimeError as exc:
+            text = str(exc)
+        GLib.idle_add(self._email_test_done, text)
+
+    def _email_test_done(self, text: str) -> bool:
+        self.email_test_button.set_sensitive(True)
         self._set_status(text)
         return False
 

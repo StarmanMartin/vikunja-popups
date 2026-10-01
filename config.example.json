@@ -9,5 +9,16 @@
   "gap": 10,
   "max_visible": 12,
   "verify_tls": true,
-  "ai_model": ""
+  "ai_model": "",
+  "email": {
+    "address": "",
+    "username": "",
+    "password": "",
+    "imap_host": "",
+    "imap_port": 993,
+    "imap_security": "ssl",
+    "smtp_host": "",
+    "smtp_port": 587,
+    "smtp_security": "starttls"
+  }
 }
