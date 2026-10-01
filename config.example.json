@@ -20,5 +20,10 @@
     "smtp_host": "",
     "smtp_port": 587,
     "smtp_security": "starttls"
+  },
+  "github": {
+    "username": "",
+    "token": "",
+    "api_url": "https://api.github.com"
   }
 }

@@ -14,11 +14,15 @@ from gi.repository import GLib, Gtk  # type: ignore  # noqa: E402
 from config import (
     CONFIG_FILE,
     EXAMPLE,
+    GitHubConfig,
     email_config_from,
+    github_config_from,
     normalize_email,
+    normalize_github,
     read_raw_config,
     save_raw_config,
 )
+from github_client import get_login, test_login as test_github_login, token_page_url
 from mail_client import test_login
 from opencode_models import list_models
 from vikunja_client import VikunjaClient
@@ -154,6 +158,7 @@ class SettingsWindow(Gtk.Window):
         notebook = Gtk.Notebook()
         notebook.append_page(grid, Gtk.Label(label="General"))
         notebook.append_page(self._build_email_page(), Gtk.Label(label="Email"))
+        notebook.append_page(self._build_github_page(), Gtk.Label(label="GitHub"))
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         box.pack_start(notebook, True, True, 0)
@@ -161,6 +166,7 @@ class SettingsWindow(Gtk.Window):
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         self._update_service_button()
+        self._fill_github_username()
 
     @staticmethod
     def _add_row(grid: Gtk.Grid, row: int, text: str, widget: Gtk.Widget) -> int:
@@ -249,6 +255,77 @@ class SettingsWindow(Gtk.Window):
             email[key] = combo.get_active_id()
         return email
 
+    def _build_github_page(self) -> Gtk.Grid:
+        # One account only, stored as the "github" object of the config.
+        github = normalize_github(self.data.get("github"))
+        grid = Gtk.Grid(column_spacing=12, row_spacing=10, border_width=14)
+        row = 0
+
+        # Not editable: saving a token looks up the login it belongs to.
+        self.github_username = Gtk.Label(xalign=0, selectable=True)
+        self._show_github_username(github["username"])
+        row = self._add_row(grid, row, "Username", self.github_username)
+
+        self.github_entries: dict[str, Gtk.Entry] = {
+            "token": self._secret_entry(github["token"]),
+            "api_url": Gtk.Entry(hexpand=True),
+        }
+        self.github_entries["api_url"].set_placeholder_text(EXAMPLE["github"]["api_url"])
+        self.github_entries["api_url"].set_text(github["api_url"])
+        for key, label in (("token", "Access token"), ("api_url", "API URL")):
+            row = self._add_row(grid, row, label, self.github_entries[key])
+
+        note = Gtk.Label(
+            label="A personal access token; \"Create token\" opens the GitHub page "
+            "that generates one. The username is filled in when the token is saved. It is stored in the config file (mode 0600). Change the API URL only "
+            "for GitHub Enterprise.",
+            xalign=0,
+            wrap=True,
+            max_width_chars=60,
+        )
+        note.get_style_context().add_class("dim-label")
+        grid.attach(note, 1, row, 1, 1)
+        row += 1
+
+        self.github_test_button = Gtk.Button(label="Test login")
+        self.github_test_button.connect("clicked", self._on_github_test)
+        token_button = Gtk.Button(label="Create token")
+        token_button.set_tooltip_text("Opens the GitHub page that generates a personal access token.")
+        token_button.connect("clicked", self._on_github_token_page)
+        buttons = Gtk.Box(spacing=8)
+        buttons.pack_start(self.github_test_button, False, False, 0)
+        buttons.pack_start(token_button, False, False, 0)
+        grid.attach(buttons, 1, row, 1, 1)
+        return grid
+
+    def _on_github_token_page(self, _button: Gtk.Button) -> None:
+        # Follows the API URL entry, so GitHub Enterprise opens its own page.
+        url = token_page_url(self.github_entries["api_url"].get_text().strip())
+        try:
+            Gtk.show_uri_on_window(self, url, Gtk.get_current_event_time())
+        except GLib.Error as exc:
+            self._set_status(f"Could not open {url}: {exc.message}")
+
+    def _show_github_username(self, username: str) -> None:
+        self.github_username.set_text(username or "Filled in when a token is saved")
+        context = self.github_username.get_style_context()
+        if username:
+            context.remove_class("dim-label")
+        else:
+            context.add_class("dim-label")
+
+    def _github_values(self) -> dict:
+        # Start from what was read, so keys unknown to this form are kept.
+        raw = self.data.get("github")
+        github = dict(raw) if isinstance(raw, dict) else {}
+        for key, entry in self.github_entries.items():
+            github[key] = entry.get_text().strip()
+        # The stored username belongs to the saved token and account only.
+        saved = normalize_github(raw)
+        if (github["token"], github["api_url"]) != (saved["token"], saved["api_url"]):
+            github["username"] = ""
+        return github
+
     def _set_status(self, text: str) -> None:
         self.status.set_text(text)
 
@@ -258,6 +335,7 @@ class SettingsWindow(Gtk.Window):
             "token": self.token.get_text().strip(),
             "ai_model": self.ai_model.get_child().get_text().strip(),
             "email": self._email_values(),
+            "github": self._github_values(),
         }
         for key, spin in self.spins.items():
             values[key] = spin.get_value_as_int()
@@ -351,6 +429,29 @@ class SettingsWindow(Gtk.Window):
         self._set_status(text)
         return False
 
+    # --- Test GitHub login --------------------------------------------------
+    def _on_github_test(self, button: Gtk.Button) -> None:
+        button.set_sensitive(False)
+        self._set_status("Logging in to GitHub...")
+        threading.Thread(
+            target=self._github_test_worker,
+            args=(self._github_values(),),
+            daemon=True,
+        ).start()
+
+    def _github_test_worker(self, github: dict) -> None:
+        # Runs in a thread: no GTK calls here.
+        try:
+            text = test_github_login(github_config_from(github))
+        except RuntimeError as exc:
+            text = str(exc)
+        GLib.idle_add(self._github_test_done, text)
+
+    def _github_test_done(self, text: str) -> bool:
+        self.github_test_button.set_sensitive(True)
+        self._set_status(text)
+        return False
+
     # --- Save ---------------------------------------------------------------
     def _on_save(self, _button: Gtk.Button) -> None:
         values = self._form_values()
@@ -365,6 +466,43 @@ class SettingsWindow(Gtk.Window):
             return
         self._set_status(f"Saved. {self._restart_service()}")
         self._update_service_button()
+        self._fill_github_username()
+
+    # --- GitHub username ----------------------------------------------------
+    def _fill_github_username(self) -> None:
+        github = normalize_github(self.data.get("github"))
+        self._show_github_username(github["username"])
+        if github["token"] and not github["username"]:
+            threading.Thread(
+                target=self._github_username_worker,
+                args=(github_config_from(github),),
+                daemon=True,
+            ).start()
+
+    def _github_username_worker(self, account: GitHubConfig) -> None:
+        # Runs in a thread: no GTK calls here.
+        try:
+            login, error = get_login(account), None
+        except RuntimeError as exc:
+            login, error = "", str(exc)
+        GLib.idle_add(self._github_username_done, account, login, error)
+
+    def _github_username_done(self, account: GitHubConfig, login: str, error: str | None) -> bool:
+        github = self.data.get("github")
+        # Ignore the answer if another token was saved in the meantime.
+        if not isinstance(github, dict) or normalize_github(github)["token"] != account.token:
+            return False
+        if error:
+            self._set_status(f"Saved, but the GitHub username could not be looked up: {error}")
+            return False
+        github["username"] = login
+        try:
+            save_raw_config(self.data)
+        except OSError as exc:
+            self._set_status(f"Could not save the GitHub username: {exc}")
+            return False
+        self._show_github_username(login)
+        return False
 
     # --- Service ------------------------------------------------------------
     @staticmethod

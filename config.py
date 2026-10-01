@@ -30,6 +30,13 @@ class EmailConfig:
 
 
 @dataclass(frozen=True)
+class GitHubConfig:
+    username: str = ""
+    token: str = ""
+    api_url: str = "https://api.github.com"
+
+
+@dataclass(frozen=True)
 class Config:
     base_url: str
     token: str
@@ -43,6 +50,7 @@ class Config:
     verify_tls: bool = True
     ai_model: str = ""
     email: EmailConfig = EmailConfig()
+    github: GitHubConfig = GitHubConfig()
 
 
 EXAMPLE = {
@@ -67,6 +75,11 @@ EXAMPLE = {
         "smtp_host": "",
         "smtp_port": 587,
         "smtp_security": "starttls",
+    },
+    "github": {
+        "username": "",
+        "token": "",
+        "api_url": "https://api.github.com",
     },
 }
 
@@ -134,6 +147,17 @@ def normalize_email(raw: object) -> dict:
     return email
 
 
+def normalize_github(raw: object) -> dict:
+    """The `github` section with defaults filled in, lenient like the email one."""
+    defaults = EXAMPLE["github"]
+    raw = raw if isinstance(raw, dict) else {}
+    github = {**raw}
+    for key, default in defaults.items():
+        github[key] = str(raw.get(key) or "").strip()
+    github["api_url"] = github["api_url"].rstrip("/") or defaults["api_url"]
+    return github
+
+
 def load_state() -> dict:
     try:
         data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -150,6 +174,11 @@ def save_state(state: dict) -> None:
 def email_config_from(raw: object) -> EmailConfig:
     email = normalize_email(raw)
     return EmailConfig(**{key: email[key] for key in EXAMPLE["email"]})
+
+
+def github_config_from(raw: object) -> GitHubConfig:
+    github = normalize_github(raw)
+    return GitHubConfig(**{key: github[key] for key in EXAMPLE["github"]})
 
 
 def load_config() -> Config:
@@ -179,4 +208,5 @@ def load_config() -> Config:
         verify_tls=bool(data.get("verify_tls", True)),
         ai_model=str(data.get("ai_model") or "").strip(),
         email=email_config_from(data.get("email")),
+        github=github_config_from(data.get("github")),
     )

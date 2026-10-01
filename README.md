@@ -73,6 +73,11 @@ Example:
     "smtp_host": "",
     "smtp_port": 587,
     "smtp_security": "starttls"
+  },
+  "github": {
+    "username": "",
+    "token": "",
+    "api_url": "https://api.github.com"
   }
 }
 ```
@@ -153,6 +158,13 @@ Restarting the application clears all dismissals.
   `smtp_security` are `ssl`, `starttls` or `none`. The password is stored in
   the config file (mode `0600`), like the API token. "Test login" tries the
   IMAP and SMTP login without saving.
+- `github`: one GitHub account (the "GitHub" tab of the settings app):
+  a personal access `token` and `api_url` (change it only for GitHub
+  Enterprise, e.g. `https://ghe.example.com/api/v3`). `username` cannot be
+  edited: the settings app looks it up from the token when it is saved. The token is
+  stored in the config file (mode `0600`). "Test login" checks the token
+  without saving; "Create token" opens GitHub's page for a new fine-grained
+  token. Not used by the popups yet.
 
 ## Email assistant
 
