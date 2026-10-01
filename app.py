@@ -30,6 +30,7 @@ if GtkLayerShell is None or "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "")
 from gi.repository import Gio, GLib, Gtk, Gdk  # type: ignore  # noqa: E402
 
 import ai_mail  # noqa: E402
+import github_client  # noqa: E402
 import mail_client  # noqa: E402
 from config import CONFIG_FILE, Config, load_config, load_state, save_state  # noqa: E402
 from vikunja_client import (  # noqa: E402
@@ -155,6 +156,8 @@ TAB_MAX_CHARS = 26
 HIDE_DELAY_MS = 300
 # Emails handed to the AI per check; the rest follow on the next refresh.
 MAIL_BATCH = 10
+# The same for GitHub items (assigned issues/PRs, new comments on own PRs).
+GITHUB_BATCH = 10
 
 
 def priority_class(priority: int) -> str | None:
@@ -711,7 +714,7 @@ def describe_action(action: dict, task_titles: dict[int, str], project_titles: d
 
 
 class ProposalCard(Gtk.EventBox):
-    """What the AI proposes for one email; nothing happens until confirmed."""
+    """What the AI proposes for one email or GitHub item; nothing happens until confirmed."""
 
     def __init__(
         self,
@@ -742,6 +745,12 @@ class ProposalCard(Gtk.EventBox):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         outer.pack_start(row, False, False, 0)
         title = wrapped_label(message.get("subject") or "(no subject)", "task-title")
+        if message.get("url"):
+            title.set_markup(
+                f'<a href="{html.escape(message["url"])}">{html.escape(title.get_text())}</a>'
+            )
+            title.set_tooltip_text(message["url"])
+            title.connect("activate-link", TaskCard._open_link)
         row.pack_start(title, True, True, 0)
         close = Gtk.Button(label="×")
         close.set_relief(Gtk.ReliefStyle.NONE)
@@ -840,7 +849,7 @@ class ProposalCard(Gtk.EventBox):
 
 
 class ProposalPanel(PanelWindow):
-    """The cards of all emails the AI has proposals for."""
+    """The cards of all emails and GitHub items the AI has proposals for."""
 
     def __init__(self, config: Config, on_execute, on_discard) -> None:
         super().__init__(config)
@@ -1011,19 +1020,19 @@ class ProjectView(HoverView):
 
 
 class AiView(HoverView):
-    """The "Mail" tab: AI proposals for new emails, waiting for confirmation."""
+    """The "Inbox" tab: AI proposals for new emails and GitHub items, waiting for confirmation."""
 
     def __init__(self, config: Config, on_execute, on_discard) -> None:
         self.proposals: list[dict] = []
-        tab = TaskTab(config, "Mail")
+        tab = TaskTab(config, "Inbox")
         tab.frame.get_style_context().add_class("ai-tab")
         super().__init__(tab, ProposalPanel(config, on_execute, on_discard))
 
     def set_proposals(self, proposals: list[dict], task_titles, project_titles) -> None:
         self.proposals = proposals
         self.panel.set_proposals(proposals, task_titles, project_titles)
-        self.tab.set_heading(f"Mail · {len(proposals)}")
-        self.tab.set_tooltip_text(f"AI proposals for {len(proposals)} email(s)")
+        self.tab.set_heading(f"Inbox · {len(proposals)}")
+        self.tab.set_tooltip_text(f"AI proposals for {len(proposals)} email(s) or GitHub item(s)")
         if not proposals:
             self.hide_panel(force=True)
             self.tab.hide()
@@ -1065,6 +1074,9 @@ class VikunjaPopupApp:
         self.mail_busy = False
         self._mail_started = float("-inf")
         self._last_mail_error: str | None = None
+        self.github_busy = False
+        self._github_started = float("-inf")
+        self._last_github_error: str | None = None
         self.ai_view = AiView(
             self.config,
             on_execute=self._execute_proposal,
@@ -1144,6 +1156,7 @@ class VikunjaPopupApp:
         if errors:
             self._show_error("\n".join(errors))
         self._start_mail_check()
+        self._start_github_check()
         return False
 
     def _connect_hover(self, view: HoverView) -> None:
@@ -1159,7 +1172,7 @@ class VikunjaPopupApp:
 
     def _place_tabs(self) -> None:
         # The tabs stack downwards from the top right corner; each one is as
-        # tall as its rotated project name needs. The Mail tab comes first
+        # tall as its rotated project name needs. The Inbox tab comes first
         # and only exists while there are proposals.
         top = 0
         for view in self._all_views():
@@ -1359,6 +1372,125 @@ class VikunjaPopupApp:
         if error and error != self._last_mail_error:
             self._show_error(error, heading="Email check failed")
         self._last_mail_error = error
+        return False
+
+    # --- GitHub + AI --------------------------------------------------------
+    def _start_github_check(self) -> None:
+        """Hand new GitHub items to the AI, once per refresh interval.
+
+        State: `github_assigned` holds the refs of open assigned issues/PRs
+        that were already handled, `github_since` the start of the window for
+        new comments on the user's PRs and `github_seen` the comment items
+        handled within the current window.
+        """
+        github = self.config.github
+        if self.github_busy or not self.projects:
+            return
+        if not (self.config.ai_model and github.token):
+            return
+        now = time.monotonic()
+        if now - self._github_started < self.config.refresh_seconds / 2:
+            return
+        self._github_started = now
+
+        assigned = self.state.get("github_assigned")
+        since = self.state.get("github_since")
+        first_run = not isinstance(assigned, list) or not isinstance(since, (int, float))
+        self.github_busy = True
+        tasks = {project_id: list(view.tasks) for project_id, view in self.views.items()}
+        threading.Thread(
+            target=self._github_worker,
+            args=(
+                first_run,
+                set(assigned or []),
+                float(since or 0),
+                set(self.state.get("github_seen") or []),
+                list(self.projects),
+                tasks,
+            ),
+            daemon=True,
+        ).start()
+
+    def _github_worker(
+        self,
+        first_run: bool,
+        assigned_seen: set[str],
+        since: float,
+        seen: set[str],
+        projects: list[VikunjaProject],
+        tasks: dict[int, list[VikunjaTask]],
+    ) -> None:
+        # Runs in a thread: no GTK calls here.
+        account = self.config.github
+        try:
+            login = account.username or github_client.get_login(account)
+            client = github_client.GitHubClient(account)
+            until = time.time()
+            assigned = client.assigned(login)
+            open_refs = [item.ref for item in assigned]
+            if first_run:
+                # Start from now instead of handing everything to the AI.
+                GLib.idle_add(self._on_github_done, None, open_refs, until)
+                return
+            items = [item for item in assigned if item.ref not in assigned_seen]
+            items += [item for item in client.new_pr_comments(login, since, until) if item.key not in seen]
+            for item in items[:GITHUB_BATCH]:
+                result = ai_mail.analyze_github(self.config.ai_model, item, projects, tasks)
+                GLib.idle_add(self._on_github_analyzed, item, result)
+            # With items left over, the comment window stays open for the next check.
+            complete = len(items) <= GITHUB_BATCH
+            GLib.idle_add(self._on_github_done, None, open_refs, until if complete else None)
+        except Exception as exc:
+            # Nothing unanswered is marked as handled, so it is tried again.
+            LOG.exception("GitHub check failed")
+            GLib.idle_add(self._on_github_done, str(exc), None, None)
+
+    def _on_github_analyzed(self, item: github_client.GitHubItem, result: dict) -> bool:
+        handled = self.state.setdefault(
+            "github_assigned" if item.kind == "assigned" else "github_seen", []
+        )
+        mark = item.ref if item.kind == "assigned" else item.key
+        if mark not in handled:
+            handled.append(mark)
+
+        if (result["actions"] or result["error"]) and self._find_proposal(item.key) is None:
+            what = "Assigned to you" if item.kind == "assigned" else f"New comments by {item.author}"
+            message = {
+                "source": "github",
+                "subject": f"{item.ref}: {item.title}",
+                "sender": f"GitHub · {what}",
+                "timestamp": item.timestamp,
+                "url": item.url,
+            }
+            self._proposals().append({"id": item.key, "message": message, **result})
+        else:
+            LOG.info("GitHub %s needs nothing: %s", item.ref, result["summary"])
+        self._save_state()
+        self._update_ai_view()
+        self._place_tabs()
+        return False
+
+    def _on_github_done(self, error: str | None, open_refs: list[str] | None, until: float | None) -> bool:
+        self.github_busy = False
+        if open_refs is not None:
+            # Forget issues/PRs that are closed or no longer assigned, so one
+            # that is assigned again later is handled again.
+            if not isinstance(self.state.get("github_assigned"), list):
+                self.state["github_assigned"] = list(open_refs)
+                LOG.info("GitHub: starting with items that appear from now on")
+            else:
+                still_open = set(open_refs)
+                self.state["github_assigned"] = [
+                    ref for ref in self.state["github_assigned"] if ref in still_open
+                ]
+        if until is not None:
+            self.state["github_since"] = until
+            self.state["github_seen"] = []
+        if open_refs is not None or until is not None:
+            self._save_state()
+        if error and error != self._last_github_error:
+            self._show_error(error, heading="GitHub check failed")
+        self._last_github_error = error
         return False
 
     def _discard_proposal(self, proposal_id: str) -> None:

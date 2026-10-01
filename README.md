@@ -164,7 +164,7 @@ Restarting the application clears all dismissals.
   edited: the settings app looks it up from the token when it is saved. The token is
   stored in the config file (mode `0600`). "Test login" checks the token
   without saving; "Create token" opens GitHub's page for a new fine-grained
-  token. Not used by the popups yet.
+  token. Used by the GitHub assistant (below).
 
 ## Email assistant
 
@@ -179,7 +179,7 @@ Active when both `ai_model` and an IMAP server are set.
   should be created or changed (title, priority, due date, done, text added
   to the description, a comment), and whether it needs an answer, which it
   drafts.
-- Emails with proposals get a card in the purple **Mail** tab at the top of
+- Emails with proposals get a card in the purple **Inbox** tab at the top of
   the tab column. Each proposed action has a checkbox; task titles, texts,
   comments and the reply can be edited. Nothing happens until you click
   "Execute selected"; `×` discards the card. Actions that fail stay on the card
@@ -196,6 +196,31 @@ Active when both `ai_model` and an IMAP server are set.
 - The last handled email and the open proposals are kept in
   `~/.local/state/vikunja-popups/state.json` (mode `0600`), so they survive
   restarts. Delete the file to start over from "now".
+
+## GitHub assistant
+
+Active when both `ai_model` and a GitHub token are set.
+
+- On every refresh the app asks GitHub for
+  - open issues and pull requests assigned to you that it has not handled
+    yet, and
+  - new comments and reviews by others on pull requests you opened (issue
+    comments, review comments, and reviews that approve, request changes or
+    have text), one item per pull request.
+  The very first time it only remembers what is already assigned and the
+  current time, so old items are never processed.
+- Each item goes to the AI together with your projects and open tasks. The AI
+  says whether it belongs to an existing task (a comment, and changes to the
+  task if needed) or needs a new task. The link to GitHub goes into the
+  comment or description.
+- Proposals appear in the **Inbox** tab like the email ones; the card title
+  links to GitHub. GitHub items get no reply action.
+- An issue or pull request that is closed or unassigned is forgotten, so it is
+  handled again if it is assigned to you again later.
+- At most 10 items are handled per refresh; if the AI cannot be reached they
+  are tried again. The GitHub texts and your task list are sent to the
+  model's provider. The token needs read access to issues and pull requests
+  of the repositories involved.
 
 ## Remove
 
