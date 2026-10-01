@@ -13,8 +13,11 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 DESKTOP_FILE="${APP_NAME}-settings.desktop"
+ICON_FILE="${APP_NAME}-settings.svg"
+ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 
-APP_FILES=(app.py ai_mail.py config.py mail_client.py opencode_models.py settings.py vikunja_client.py requirements.txt)
+APP_FILES=(app.py ai_mail.py config.py mail_client.py opencode_models.py settings.py vikunja_client.py requirements.txt
+  vikunja-popups-settings.svg)
 
 if [[ "${EUID}" -eq 0 ]]; then
   echo "Run this script as your normal user, not with sudo." >&2
@@ -108,6 +111,13 @@ fi
 mkdir -p "$DESKTOP_DIR"
 sed "s|@APP_DIR@|$APP_DIR|g" "$SOURCE_DIR/$DESKTOP_FILE.in" > "$DESKTOP_DIR/$DESKTOP_FILE"
 chmod 0644 "$DESKTOP_DIR/$DESKTOP_FILE"
+mkdir -p "$ICON_DIR"
+install -m 0644 "$SOURCE_DIR/$ICON_FILE" "$ICON_DIR/$ICON_FILE"
+# GTK trusts an existing icon cache over the directory, so refresh it.
+icon_theme_dir="$(dirname "$(dirname "$ICON_DIR")")"
+if [[ -f "$icon_theme_dir/icon-theme.cache" ]] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache --quiet --force --ignore-theme-index "$icon_theme_dir" || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 fi

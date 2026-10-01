@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+from pathlib import Path
 
 import gi
 
@@ -62,7 +63,11 @@ class SettingsWindow(Gtk.Window):
         super().__init__(title="Vikunja Popups Settings")
         self.set_border_width(18)
         self.set_default_size(520, -1)
-        self.set_icon_name("preferences-system")
+        # The installed icon comes from the theme; from the source tree use the file.
+        if Gtk.IconTheme.get_default().has_icon(PRGNAME):
+            self.set_icon_name(PRGNAME)
+        else:
+            self.set_icon_from_file(str(Path(__file__).with_name(f"{PRGNAME}.svg")))
         self.connect("destroy", Gtk.main_quit)
 
         self.data = read_raw_config()

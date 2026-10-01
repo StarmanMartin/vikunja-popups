@@ -6,6 +6,7 @@ rm -f "$HOME/.config/systemd/user/vikunja-popups.service"
 systemctl --user daemon-reload
 rm -rf "$HOME/.local/share/vikunja-popups"
 rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/vikunja-popups-settings.desktop"
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps/vikunja-popups-settings.svg"
 
 echo "Application removed."
 echo "Configuration was kept at:"
