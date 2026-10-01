@@ -133,8 +133,16 @@ class SettingsWindow(Gtk.Window):
         save_button.get_style_context().add_class("suggested-action")
         save_button.connect("clicked", self._on_save)
 
+        self.service_button = Gtk.Button()
+        self.service_button.set_tooltip_text(
+            "Stops or starts the installed popup service. "
+            "A copy started with python app.py is not affected."
+        )
+        self.service_button.connect("clicked", self._on_service_toggle)
+
         buttons = Gtk.Box(spacing=8)
         buttons.pack_start(self.test_button, False, False, 0)
+        buttons.pack_start(self.service_button, False, False, 0)
         buttons.pack_end(save_button, False, False, 0)
         buttons.pack_end(close_button, False, False, 0)
 
@@ -147,6 +155,7 @@ class SettingsWindow(Gtk.Window):
         box.pack_start(self.status, False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
+        self._update_service_button()
 
     @staticmethod
     def _add_row(grid: Gtk.Grid, row: int, text: str, widget: Gtk.Widget) -> int:
@@ -350,15 +359,50 @@ class SettingsWindow(Gtk.Window):
             self._set_status(f"Could not save: {exc}")
             return
         self._set_status(f"Saved. {self._restart_service()}")
+        self._update_service_button()
 
+    # --- Service ------------------------------------------------------------
     @staticmethod
-    def _restart_service() -> str:
+    def _service_active() -> bool:
         try:
-            active = subprocess.run(
+            return subprocess.run(
                 ["systemctl", "--user", "is-active", "--quiet", SERVICE],
                 timeout=10,
             ).returncode == 0
-            if not active:
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def _update_service_button(self) -> None:
+        label = "Stop app" if self._service_active() else "Start app"
+        self.service_button.set_label(label)
+
+    def _on_service_toggle(self, _button: Gtk.Button) -> None:
+        stop = self._service_active()
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "stop" if stop else "start", SERVICE],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._set_status(f"Could not {'stop' if stop else 'start'} the popup app: {exc}")
+        else:
+            if result.returncode != 0:
+                self._set_status(
+                    f"Could not {'stop' if stop else 'start'} the popup app: "
+                    f"{result.stderr.strip()}"
+                )
+            elif stop:
+                self._set_status("Popup app stopped (it starts again at next login).")
+            else:
+                self._set_status("Popup app started.")
+        self._update_service_button()
+
+    @classmethod
+    def _restart_service(cls) -> str:
+        try:
+            if not cls._service_active():
                 return "The popup service is not running; start it to apply the settings."
             result = subprocess.run(
                 ["systemctl", "--user", "restart", SERVICE],

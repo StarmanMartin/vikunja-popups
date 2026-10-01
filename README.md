@@ -38,7 +38,9 @@ keeps your configuration and restarts the service if it is running.
 
 Then open **Vikunja Popups Settings** from the application menu, enter the
 server URL and API token, and save. Saving restarts the popup service if it is
-running. "Test connection" checks the URL and token without saving.
+running. "Test connection" checks the URL and token without saving. "Stop app"
+stops the popup service until the next login; while it is stopped, the same
+button reads "Start app".
 
 You can also edit the file by hand:
 
