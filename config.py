@@ -8,6 +8,9 @@ from pathlib import Path
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "vikunja-popups"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+# Runtime state (last read email, pending AI proposals), not configuration.
+STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "vikunja-popups"
+STATE_FILE = STATE_DIR / "state.json"
 
 
 EMAIL_SECURITY = ("ssl", "starttls", "none")
@@ -87,15 +90,20 @@ def read_raw_config() -> dict:
     return {**EXAMPLE, **data}
 
 
-def save_raw_config(data: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
-    # Create it with mode 0600 from the start: it holds the API token.
+def write_private_json(path: Path, data: object) -> None:
+    """Atomically write JSON readable only by the user."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    # Create it with mode 0600 from the start: it holds secrets.
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(data, indent=2) + "\n")
     tmp.chmod(0o600)
-    os.replace(tmp, CONFIG_FILE)
+    os.replace(tmp, path)
+
+
+def save_raw_config(data: dict) -> None:
+    write_private_json(CONFIG_FILE, data)
 
 
 def normalize_email(raw: object) -> dict:
@@ -126,6 +134,24 @@ def normalize_email(raw: object) -> dict:
     return email
 
 
+def load_state() -> dict:
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_state(state: dict) -> None:
+    # Mode 0600: pending proposals contain email text.
+    write_private_json(STATE_FILE, state)
+
+
+def email_config_from(raw: object) -> EmailConfig:
+    email = normalize_email(raw)
+    return EmailConfig(**{key: email[key] for key in EXAMPLE["email"]})
+
+
 def load_config() -> Config:
     ensure_example_config()
     data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -152,11 +178,5 @@ def load_config() -> Config:
         max_visible=max(1, int(data.get("max_visible", 12))),
         verify_tls=bool(data.get("verify_tls", True)),
         ai_model=str(data.get("ai_model") or "").strip(),
-        email=EmailConfig(
-            **{
-                key: value
-                for key, value in normalize_email(data.get("email")).items()
-                if key in EXAMPLE["email"]
-            }
-        ),
+        email=email_config_from(data.get("email")),
     )

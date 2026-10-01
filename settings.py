@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import imaplib
 import os
-import smtplib
-import ssl
 import subprocess
 import threading
 
@@ -16,10 +13,12 @@ from gi.repository import GLib, Gtk  # type: ignore  # noqa: E402
 from config import (
     CONFIG_FILE,
     EXAMPLE,
+    email_config_from,
     normalize_email,
     read_raw_config,
     save_raw_config,
 )
+from mail_client import test_login
 from opencode_models import list_models
 from vikunja_client import VikunjaClient
 
@@ -56,60 +55,6 @@ EMAIL_SECURITY_LABELS = (
     ("starttls", "STARTTLS"),
     ("none", "None"),
 )
-EMAIL_TIMEOUT = 15
-
-
-def test_email_login(email: dict) -> str:
-    """Log in to the configured IMAP and SMTP servers. Blocking."""
-    user = email["username"] or email["address"]
-    context = ssl.create_default_context()
-    checked = []
-
-    if email["imap_host"]:
-        try:
-            if email["imap_security"] == "ssl":
-                imap = imaplib.IMAP4_SSL(
-                    email["imap_host"],
-                    email["imap_port"],
-                    ssl_context=context,
-                    timeout=EMAIL_TIMEOUT,
-                )
-            else:
-                imap = imaplib.IMAP4(
-                    email["imap_host"], email["imap_port"], timeout=EMAIL_TIMEOUT
-                )
-            with imap:
-                if email["imap_security"] == "starttls":
-                    imap.starttls(ssl_context=context)
-                imap.login(user, email["password"])
-        except Exception as exc:
-            raise RuntimeError(f"IMAP login failed: {exc}") from exc
-        checked.append("IMAP")
-
-    if email["smtp_host"]:
-        try:
-            if email["smtp_security"] == "ssl":
-                smtp = smtplib.SMTP_SSL(
-                    email["smtp_host"],
-                    email["smtp_port"],
-                    context=context,
-                    timeout=EMAIL_TIMEOUT,
-                )
-            else:
-                smtp = smtplib.SMTP(
-                    email["smtp_host"], email["smtp_port"], timeout=EMAIL_TIMEOUT
-                )
-            with smtp:
-                if email["smtp_security"] == "starttls":
-                    smtp.starttls(context=context)
-                smtp.login(user, email["password"])
-        except Exception as exc:
-            raise RuntimeError(f"SMTP login failed: {exc}") from exc
-        checked.append("SMTP")
-
-    if not checked:
-        raise RuntimeError("Enter an IMAP or SMTP server.")
-    return f"Email login OK ({' and '.join(checked)})."
 
 
 class SettingsWindow(Gtk.Window):
@@ -382,7 +327,7 @@ class SettingsWindow(Gtk.Window):
     def _email_test_worker(self, email: dict) -> None:
         # Runs in a thread: no GTK calls here.
         try:
-            text = test_email_login(email)
+            text = test_login(email_config_from(email))
         except RuntimeError as exc:
             text = str(exc)
         GLib.idle_add(self._email_test_done, text)

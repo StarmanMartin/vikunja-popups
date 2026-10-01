@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import json
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -153,11 +155,47 @@ class VikunjaClient:
 
         return tasks
 
-    def create_task(self, project_id: int | str, title: str) -> VikunjaTask:
-        """Create a task with the given title in a project."""
+    def create_task(
+        self,
+        project_id: int | str,
+        title: str,
+        *,
+        description: str = "",
+        priority: int = 0,
+        due_date: str | None = None,
+    ) -> VikunjaTask:
+        """Create a task in a project. `description` is HTML."""
+        body: dict[str, Any] = {"title": title}
+        if description:
+            body["description"] = description
+        if priority:
+            body["priority"] = priority
+        if due_date:
+            body["due_date"] = due_date
+        response = self._request("POST", f"/projects/{project_id}/tasks", json=body)
+        return VikunjaTask.from_api(response.json())
+
+    def get_task(self, task_id: int | str) -> VikunjaTask:
+        return VikunjaTask.from_api(self._get(f"/tasks/{task_id}").json())
+
+    def update_task(self, task_id: int | str, changes: dict[str, Any]) -> VikunjaTask:
+        """Change only the given fields (JSON merge patch)."""
         response = self._request(
-            "POST",
-            f"/projects/{project_id}/tasks",
-            json={"title": title},
+            "PATCH",
+            f"/tasks/{task_id}",
+            data=json.dumps(changes),
+            headers={"Content-Type": "application/merge-patch+json"},
         )
         return VikunjaTask.from_api(response.json())
+
+    def add_comment(self, task_id: int | str, comment: str) -> None:
+        """Add a comment (HTML) to a task."""
+        self._request("POST", f"/tasks/{task_id}/comments", json={"comment": comment})
+
+
+def text_to_html(text: str) -> str:
+    """Plain text as the HTML Vikunja stores in descriptions and comments."""
+    paragraphs = [part.strip() for part in text.strip().split("\n\n") if part.strip()]
+    return "".join(
+        f"<p>{html.escape(part).replace(chr(10), '<br>')}</p>" for part in paragraphs
+    )

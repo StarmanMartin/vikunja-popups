@@ -23,6 +23,8 @@ project and displays them as dismissible top-right popup cards.
 - Background color by task priority, task title links to the Vikunja web UI
 - Optional systemd user autostart with the graphical session
 - API token can be kept out of the config with `VIKUNJA_TOKEN`
+- Optional email assistant: an AI model (via opencode) reads new emails and
+  proposes task changes and replies, which you confirm before they happen
 
 ## Install
 
@@ -143,14 +145,43 @@ Restarting the application clears all dismissals.
   you intentionally do not want certificate verification.
 - `ai_model`: an [opencode](https://opencode.ai) model id in the form
   `provider/model`, or empty for none. The settings app offers every model
-  that `opencode models` lists. It is stored for upcoming AI features and not
-  used yet.
+  that `opencode models` lists. Used for the email assistant (below).
 - `email`: one email account (the "Email" tab of the settings app). `username`
   may stay empty when it equals `address`. `imap_security` and
   `smtp_security` are `ssl`, `starttls` or `none`. The password is stored in
   the config file (mode `0600`), like the API token. "Test login" tries the
-  IMAP and SMTP login without saving. Like `ai_model`, the account is stored
-  for upcoming features and not used yet.
+  IMAP and SMTP login without saving.
+
+## Email assistant
+
+Active when both `ai_model` and an IMAP server are set.
+
+- On every refresh the app reads the emails that arrived in the INBOX since
+  the last one it handled (by the server's arrival time). Emails are opened
+  read-only and are not marked as read. The very first time it only stores
+  the current time, so old emails are never processed.
+- Each new email goes to the AI together with your projects and open tasks.
+  The AI decides whether the email belongs to existing tasks, whether a task
+  should be created or changed (title, priority, due date, done, text added
+  to the description, a comment), and whether it needs an answer, which it
+  drafts.
+- Emails with proposals get a card in the purple **Mail** tab at the top of
+  the tab column. Each proposed action has a checkbox; task titles, texts,
+  comments and the reply can be edited. Nothing happens until you click
+  "Execute selected"; `×` discards the card. Actions that fail stay on the card
+  with the error, so you can try again.
+- Replies go to the sender (or `Reply-To`) from your `address` via SMTP, as an
+  answer in the same thread with the original quoted. They are not copied to a
+  Sent folder.
+- At most 10 emails are handled per refresh. If the AI cannot be reached, the
+  same email is tried again on the next refresh.
+- The AI runs through `opencode run --standalone` with its own agent
+  (`vikunja-popups-mail`) that may not use any tools, so text in an email
+  cannot make it run commands or change files. Each email creates an opencode
+  session. Email text and your task list are sent to the model's provider.
+- The last handled email and the open proposals are kept in
+  `~/.local/state/vikunja-popups/state.json` (mode `0600`), so they survive
+  restarts. Delete the file to start over from "now".
 
 ## Remove
 
