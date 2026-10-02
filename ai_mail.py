@@ -10,7 +10,7 @@ from datetime import datetime
 from config import STATE_DIR, write_private_json
 from github_client import GitHubItem
 from mail_client import MailMessage, html_to_text
-from opencode_models import find_opencode
+from opencode_models import NO_WINDOW, find_opencode
 from vikunja_client import VikunjaProject, VikunjaTask
 
 
@@ -264,7 +264,11 @@ def ask_model(model: str, prompt: str) -> str:
             env={**os.environ, "PWD": str(WORK_DIR)},
             capture_output=True,
             text=True,
+            # opencode answers in UTF-8, whatever the Windows code page is.
+            encoding="utf-8",
+            errors="replace",
             timeout=TIMEOUT,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise AiError(f"opencode did not answer within {TIMEOUT} s") from None

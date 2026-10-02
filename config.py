@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "vikunja-popups"
+if sys.platform == "win32":
+    CONFIG_DIR = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "vikunja-popups"
+    STATE_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "vikunja-popups"
+else:
+    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "vikunja-popups"
+    # Runtime state (last read email, pending AI proposals), not configuration.
+    STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "vikunja-popups"
 CONFIG_FILE = CONFIG_DIR / "config.json"
-# Runtime state (last read email, pending AI proposals), not configuration.
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "vikunja-popups"
 STATE_FILE = STATE_DIR / "state.json"
 
 

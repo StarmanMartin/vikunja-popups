@@ -16,7 +16,7 @@ DESKTOP_FILE="${APP_NAME}-settings.desktop"
 ICON_FILE="${APP_NAME}-settings.svg"
 ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 
-APP_FILES=(app.py ai_mail.py config.py github_client.py mail_client.py opencode_models.py settings.py vikunja_client.py requirements.txt
+APP_FILES=(app.py app_control.py ai_mail.py config.py github_client.py mail_client.py opencode_models.py settings.py vikunja_client.py requirements.txt
   vikunja-popups-settings.svg)
 
 if [[ "${EUID}" -eq 0 ]]; then

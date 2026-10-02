@@ -58,10 +58,14 @@ Details: [Inbox and proposals](#inbox-and-proposals),
 - GNOME (Wayland or X11): runs through XWayland so the popups can be
   positioned. Other Wayland compositors: uses `gtk-layer-shell` (installed
   automatically when the desktop is not GNOME)
-- Optional systemd user autostart with the graphical session
+- Runs on Ubuntu (and other Linux desktops) and on Windows 10/11 via MSYS2
+- Optional autostart at login (systemd user service on Linux, Startup
+  shortcut on Windows)
 - API token can be kept out of the config with `VIKUNJA_TOKEN`
 
 ## Install
+
+On Windows, see [Install on Windows](#install-on-windows).
 
 ```bash
 ./install.sh
@@ -129,6 +133,49 @@ export VIKUNJA_TOKEN='tk_...'
 
 For systemd, you can put the variable into an environment file and add an
 `EnvironmentFile=` line to the service, or use the mode-0600 config file.
+
+## Install on Windows
+
+The app uses GTK 3, which on Windows comes from [MSYS2](https://www.msys2.org),
+a free collection of open-source tools and libraries for Windows.
+
+1. Install MSYS2 with its installer from msys2.org (default folder
+   `C:\msys64`).
+2. In PowerShell, in this folder:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File install.ps1
+   ```
+
+   It installs GTK 3, PyGObject and requests with MSYS2's `pacman` (updating
+   MSYS2 first when packages are missing), copies the app to
+   `%LOCALAPPDATA%\Programs\vikunja-popups`, and creates the Start-menu
+   entries **Vikunja Popups** and **Vikunja Popups Settings** plus a shortcut
+   in the Startup folder so the app starts at login. Options:
+   `-Msys2Root D:\msys64` when MSYS2 is elsewhere, `-NoAutostart` to skip
+   the Startup shortcut.
+3. Open **Vikunja Popups Settings**, enter the server URL and token, and save;
+   then start **Vikunja Popups** (or use "Start app" in the settings).
+
+Re-run `install.ps1` after updating the code; it keeps the configuration and
+restarts the app if it is running. For the AI assistant, install opencode
+for Windows as well; the app finds `opencode` on the `PATH`, in
+`~\.opencode\bin` or in npm's global folder.
+
+On Windows the files live in other places:
+
+- Config: `%APPDATA%\vikunja-popups\config.json`
+- State (proposals, last email) and log file `app.log`:
+  `%LOCALAPPDATA%\vikunja-popups\`
+
+"Stop app" in the settings ends the running app until it is started again or
+the next login. Remove the app with
+`powershell -ExecutionPolicy Bypass -File uninstall.ps1` (keeps the config and
+MSYS2).
+
+Windows support is new and less tested than Linux: if the popups look or
+behave differently (transparency, staying on top, focus of the input boxes),
+please check `app.log`.
 
 ## Test manually
 
@@ -299,3 +346,5 @@ Active when both `ai_model` and a GitHub token are set.
 ```bash
 ./uninstall.sh
 ```
+
+On Windows: `powershell -ExecutionPolicy Bypass -File uninstall.ps1`.

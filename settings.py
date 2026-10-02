@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import threading
 from pathlib import Path
 
@@ -11,6 +10,7 @@ gi.require_version("Gtk", "3.0")
 
 from gi.repository import GLib, Gtk  # type: ignore  # noqa: E402
 
+import app_control
 from config import (
     CONFIG_FILE,
     EXAMPLE,
@@ -29,7 +29,6 @@ from vikunja_client import VikunjaClient
 
 
 PRGNAME = "vikunja-popups-settings"
-SERVICE = "vikunja-popups.service"
 
 # key, label, lower bound (the same bounds load_config() clamps to)
 NUMBER_FIELDS = (
@@ -71,7 +70,10 @@ class SettingsWindow(Gtk.Window):
         if Gtk.IconTheme.get_default().has_icon(PRGNAME):
             self.set_icon_name(PRGNAME)
         else:
-            self.set_icon_from_file(str(Path(__file__).with_name(f"{PRGNAME}.svg")))
+            try:
+                self.set_icon_from_file(str(Path(__file__).with_name(f"{PRGNAME}.svg")))
+            except GLib.Error:
+                pass  # no SVG loader for gdk-pixbuf (possible on Windows)
         self.connect("destroy", Gtk.main_quit)
 
         self.data = read_raw_config()
@@ -505,59 +507,35 @@ class SettingsWindow(Gtk.Window):
         return False
 
     # --- Service ------------------------------------------------------------
-    @staticmethod
-    def _service_active() -> bool:
-        try:
-            return subprocess.run(
-                ["systemctl", "--user", "is-active", "--quiet", SERVICE],
-                timeout=10,
-            ).returncode == 0
-        except (OSError, subprocess.SubprocessError):
-            return False
-
     def _update_service_button(self) -> None:
-        label = "Stop app" if self._service_active() else "Start app"
+        label = "Stop app" if app_control.is_running() else "Start app"
         self.service_button.set_label(label)
 
     def _on_service_toggle(self, _button: Gtk.Button) -> None:
-        stop = self._service_active()
+        stop = app_control.is_running()
         try:
-            result = subprocess.run(
-                ["systemctl", "--user", "stop" if stop else "start", SERVICE],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
+            app_control.stop() if stop else app_control.start()
+        except app_control.ControlError as exc:
             self._set_status(f"Could not {'stop' if stop else 'start'} the popup app: {exc}")
         else:
-            if result.returncode != 0:
-                self._set_status(
-                    f"Could not {'stop' if stop else 'start'} the popup app: "
-                    f"{result.stderr.strip()}"
-                )
-            elif stop:
+            if stop:
                 self._set_status("Popup app stopped (it starts again at next login).")
             else:
                 self._set_status("Popup app started.")
+        if app_control.WINDOWS and not stop:
+            # The new process writes its PID file a moment after starting.
+            GLib.timeout_add_seconds(2, lambda: self._update_service_button() or False)
         self._update_service_button()
 
-    @classmethod
-    def _restart_service(cls) -> str:
+    @staticmethod
+    def _restart_service() -> str:
+        if not app_control.is_running():
+            return "The popup app is not running; start it to apply the settings."
         try:
-            if not cls._service_active():
-                return "The popup service is not running; start it to apply the settings."
-            result = subprocess.run(
-                ["systemctl", "--user", "restart", SERVICE],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            return f"Could not restart the popup service: {exc}"
-        if result.returncode != 0:
-            return f"Could not restart the popup service: {result.stderr.strip()}"
-        return "Popup service restarted."
+            app_control.restart()
+        except app_control.ControlError as exc:
+            return f"Could not restart the popup app: {exc}"
+        return "Popup app restarted."
 
 
 def main() -> None:

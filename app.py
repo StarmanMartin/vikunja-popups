@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import atexit
 import html
 import logging
 import os
 import re
 import signal
+import sys
 import threading
 import time
 from dataclasses import asdict, fields as dataclass_fields
@@ -22,17 +24,21 @@ except (ValueError, ImportError):
 
 # GNOME (Mutter) does not implement wlr-layer-shell and ignores client window
 # positioning on Wayland. Run through XWayland there so move() works. Must be
-# set before Gtk is imported, because importing Gtk opens the display.
-if GtkLayerShell is None or "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", ""):
+# set before Gtk is imported, because importing Gtk opens the display. Not on
+# Windows, where GTK's own backend positions windows (and has no layer-shell).
+if sys.platform.startswith("linux") and (
+    GtkLayerShell is None or "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "")
+):
     GtkLayerShell = None
     os.environ["GDK_BACKEND"] = "x11"
 
 from gi.repository import Gio, GLib, Gtk, Gdk  # type: ignore  # noqa: E402
 
 import ai_mail  # noqa: E402
+import app_control  # noqa: E402
 import github_client  # noqa: E402
 import mail_client  # noqa: E402
-from config import CONFIG_FILE, Config, load_config, load_state, save_state  # noqa: E402
+from config import CONFIG_FILE, STATE_DIR, Config, load_config, load_state, save_state  # noqa: E402
 from vikunja_client import (  # noqa: E402
     VikunjaClient,
     VikunjaProject,
@@ -1738,14 +1744,29 @@ class VikunjaPopupApp:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    if app_control.WINDOWS:
+        # pythonw has no console and there is no journal: log to a file.
+        from logging.handlers import RotatingFileHandler
+
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            STATE_DIR / "app.log", maxBytes=1_000_000, backupCount=1, encoding="utf-8"
+        )
+        logging.basicConfig(level=logging.INFO, format=log_format, handlers=[handler])
+        if app_control.other_instance_running():
+            LOG.info("Another instance is already running; exiting")
+            return
+        app_control.write_pid()
+        atexit.register(app_control.remove_pid)
+    else:
+        logging.basicConfig(level=logging.INFO, format=log_format)
     try:
         app = VikunjaPopupApp()
         app.start()
     except Exception as exc:
+        if app_control.WINDOWS:
+            LOG.exception("vikunja-popups failed")  # nobody sees the output
         print(f"vikunja-popups: {exc}")
         print(f"Configuration file: {CONFIG_FILE}")
         raise SystemExit(1)
