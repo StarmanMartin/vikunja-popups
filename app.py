@@ -7,7 +7,7 @@ import re
 import signal
 import threading
 import time
-from dataclasses import asdict
+from dataclasses import asdict, fields as dataclass_fields
 from datetime import datetime
 
 import gi
@@ -516,17 +516,14 @@ class TaskTab(Gtk.Window):
         return self.get_size()[1]
 
 
-class NewTaskDialog(Gtk.Window):
-    """Centered single-line input that creates a task in one project."""
+class CenteredDialog(Gtk.Window):
+    """Borderless, focusable window in the middle of the screen; Escape closes it."""
 
-    def __init__(self, config: Config, project: VikunjaProject, on_submit, on_close) -> None:
+    def __init__(self, title: str, on_close) -> None:
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
-        self.config = config
-        self.project = project
-        self.on_submit = on_submit
         self.on_close = on_close
 
-        self.set_title("New Vikunja task")
+        self.set_title(title)
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_skip_taskbar_hint(True)
@@ -546,15 +543,56 @@ class NewTaskDialog(Gtk.Window):
         else:
             self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_border_width(14)
-        box.get_style_context().add_class("new-task-box")
-        self.add(box)
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.box.set_border_width(14)
+        self.box.get_style_context().add_class("new-task-box")
+        self.add(self.box)
 
-        heading = Gtk.Label(label=f"New task in {project.title}")
+        self.connect("key-press-event", self._on_key)
+        self.connect("destroy", lambda *_: self.on_close())
+
+    def add_heading(self, text: str) -> None:
+        heading = Gtk.Label(label=text)
         heading.set_xalign(0)
+        heading.set_line_wrap(True)
+        heading.set_max_width_chars(60)
         heading.get_style_context().add_class("new-task-heading")
-        box.pack_start(heading, False, False, 0)
+        self.box.pack_start(heading, False, False, 0)
+
+    def focus_widget(self) -> Gtk.Widget | None:
+        return None
+
+    def open(self, timestamp: int) -> None:
+        self.show_all()
+        if GtkLayerShell is None:
+            width, height = self.get_size()
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            area = monitor.get_workarea()
+            self.move(area.x + (area.width - width) // 2, area.y + (area.height - height) // 2)
+        # Using the click's timestamp lets the window manager give us focus.
+        self.present_with_time(timestamp)
+        widget = self.focus_widget()
+        if widget is not None:
+            widget.grab_focus()
+
+    def _on_key(self, _widget, event) -> bool:
+        if event.keyval == Gdk.KEY_Escape:
+            self.destroy()
+            return True
+        return False
+
+
+class NewTaskDialog(CenteredDialog):
+    """Centered single-line input that creates a task in one project."""
+
+    def __init__(self, config: Config, project: VikunjaProject, on_submit, on_close) -> None:
+        super().__init__("New Vikunja task", on_close)
+        self.config = config
+        self.project = project
+        self.on_submit = on_submit
+        box = self.box
+        self.add_heading(f"New task in {project.title}")
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         box.pack_start(row, False, False, 0)
@@ -579,20 +617,8 @@ class NewTaskDialog(Gtk.Window):
         self.status.set_no_show_all(True)  # only shown for errors
         box.pack_start(self.status, False, False, 0)
 
-        self.connect("key-press-event", self._on_key)
-        self.connect("destroy", lambda *_: self.on_close())
-
-    def open(self, timestamp: int) -> None:
-        self.show_all()
-        if GtkLayerShell is None:
-            width, height = self.get_size()
-            display = Gdk.Display.get_default()
-            monitor = display.get_primary_monitor() or display.get_monitor(0)
-            area = monitor.get_workarea()
-            self.move(area.x + (area.width - width) // 2, area.y + (area.height - height) // 2)
-        # Using the click's timestamp lets the window manager give us focus.
-        self.present_with_time(timestamp)
-        self.entry.grab_focus()
+    def focus_widget(self) -> Gtk.Widget:
+        return self.entry
 
     def set_busy(self, busy: bool) -> None:
         self.entry.set_sensitive(not busy)
@@ -616,11 +642,60 @@ class NewTaskDialog(Gtk.Window):
         self.set_busy(True)
         self.on_submit(title)
 
-    def _on_key(self, _widget, event) -> bool:
-        if event.keyval == Gdk.KEY_Escape:
+
+class AskAgainDialog(CenteredDialog):
+    """Centered input for instructions that send a proposal back to the AI."""
+
+    def __init__(self, proposal: dict, on_submit, on_close) -> None:
+        super().__init__("Ask the AI again", on_close)
+        self.proposal_id = proposal["id"]
+        self.on_submit = on_submit
+        subject = proposal["message"].get("subject") or "(no subject)"
+        self.add_heading(f"Ask the AI again about “{subject}”")
+
+        hint = Gtk.Label(
+            label="Additional instructions, e.g. “Please write in English” "
+            "or “It should be a new task”. Ctrl+Enter sends."
+        )
+        hint.set_xalign(0)
+        hint.set_line_wrap(True)
+        hint.set_max_width_chars(60)
+        hint.get_style_context().add_class("new-task-status")
+        self.box.pack_start(hint, False, False, 0)
+
+        scroller, self.view = text_editor("", 4)
+        scroller.set_min_content_width(440)
+        self.view.get_buffer().connect("changed", self._update_button)
+        self.box.pack_start(scroller, True, True, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.box.pack_start(row, False, False, 0)
+        self.button = Gtk.Button(label="Send to AI")
+        self.button.get_style_context().add_class("suggested-action")
+        self.button.set_sensitive(False)
+        self.button.connect("clicked", self._submit)
+        row.pack_end(self.button, False, False, 0)
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda *_: self.destroy())
+        row.pack_end(cancel, False, False, 0)
+
+    def focus_widget(self) -> Gtk.Widget:
+        return self.view
+
+    def _update_button(self, *_args) -> None:
+        self.button.set_sensitive(bool(text_of(self.view)))
+
+    def _submit(self, *_args) -> None:
+        instructions = text_of(self.view)
+        if instructions:
+            self.on_submit(self.proposal_id, instructions)
             self.destroy()
+
+    def _on_key(self, widget, event) -> bool:
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and event.state & Gdk.ModifierType.CONTROL_MASK:
+            self._submit()
             return True
-        return False
+        return super()._on_key(widget, event)
 
 
 class MessagePopup(Gtk.Window):
@@ -725,11 +800,13 @@ class ProposalCard(Gtk.EventBox):
         project_titles: dict[int, str],
         on_execute,
         on_discard,
+        on_ask_again,
     ) -> None:
         super().__init__()
         self.proposal = proposal
         self.on_execute = on_execute
         self.on_discard = on_discard
+        self.on_ask_again = on_ask_again
         # (check button, function returning the action with the user's edits)
         self.rows: list[tuple[Gtk.CheckButton, object]] = []
 
@@ -783,6 +860,12 @@ class ProposalCard(Gtk.EventBox):
         self.button.connect("clicked", self._execute)
         self.button.set_no_show_all(not self.rows)
         bottom.pack_end(self.button, False, False, 0)
+        again = Gtk.Button(label="Ask again…")
+        again.set_tooltip_text("Send this item back to the AI with additional instructions")
+        again.connect("clicked", lambda *_: self.on_ask_again(self.proposal["id"]))
+        # GitHub proposals stored before the item was kept cannot be re-sent.
+        again.set_no_show_all(message.get("source") == "github" and "item" not in message)
+        bottom.pack_end(again, False, False, 0)
 
     def _add_action(self, box: Gtk.Box, action: dict, task_titles, project_titles) -> None:
         text = describe_action(action, task_titles, project_titles)
@@ -843,20 +926,29 @@ class ProposalCard(Gtk.EventBox):
                 return
         self.on_execute(self, self.proposal["id"], actions)
 
-    def set_busy(self, busy: bool) -> None:
+    def set_busy(self, busy: bool, label: str = "Executing…") -> None:
         self.set_sensitive(not busy)
-        self.button.set_label("Executing…" if busy else "Execute selected")
+        self.button.set_label(label if busy else "Execute selected")
         if busy:
             self.status.set_text("")
+
+    def set_asking(self) -> None:
+        self.set_busy(True)
+        self.status.set_text("Asking the AI again…")
+
+    def show_error(self, message: str) -> None:
+        self.set_busy(False)
+        self.status.set_text(message)
 
 
 class ProposalPanel(PanelWindow):
     """The cards of all emails and GitHub items the AI has proposals for."""
 
-    def __init__(self, config: Config, on_execute, on_discard) -> None:
+    def __init__(self, config: Config, on_execute, on_discard, on_ask_again) -> None:
         super().__init__(config)
         self.on_execute = on_execute
         self.on_discard = on_discard
+        self.on_ask_again = on_ask_again
         self.set_name("proposal-panel-window")
         self.by_id: dict[str, ProposalCard] = {}
 
@@ -871,7 +963,9 @@ class ProposalPanel(PanelWindow):
         self.add(self.scroller)
 
     def _card(self, proposal: dict, task_titles, project_titles) -> ProposalCard:
-        return ProposalCard(proposal, task_titles, project_titles, self.on_execute, self.on_discard)
+        return ProposalCard(
+            proposal, task_titles, project_titles, self.on_execute, self.on_discard, self.on_ask_again
+        )
 
     def set_proposals(self, proposals: list[dict], task_titles, project_titles) -> None:
         # Existing cards are kept, so edits in them survive new arrivals.
@@ -1024,11 +1118,11 @@ class ProjectView(HoverView):
 class AiView(HoverView):
     """The "Inbox" tab: AI proposals for new emails and GitHub items, waiting for confirmation."""
 
-    def __init__(self, config: Config, on_execute, on_discard) -> None:
+    def __init__(self, config: Config, on_execute, on_discard, on_ask_again) -> None:
         self.proposals: list[dict] = []
         tab = TaskTab(config, "Inbox")
         tab.frame.get_style_context().add_class("ai-tab")
-        super().__init__(tab, ProposalPanel(config, on_execute, on_discard))
+        super().__init__(tab, ProposalPanel(config, on_execute, on_discard, on_ask_again))
 
     def set_proposals(self, proposals: list[dict], task_titles, project_titles) -> None:
         self.proposals = proposals
@@ -1068,6 +1162,9 @@ class VikunjaPopupApp:
         )
 
         self.new_task_dialog: NewTaskDialog | None = None
+        self.ask_again_dialog: AskAgainDialog | None = None
+        # Ids of proposals that are back with the AI.
+        self.asking: set[str] = set()
 
         # Email + AI: the last handled email and the proposals waiting for
         # confirmation live in the state file, so they survive restarts.
@@ -1083,6 +1180,7 @@ class VikunjaPopupApp:
             self.config,
             on_execute=self._execute_proposal,
             on_discard=self._discard_proposal,
+            on_ask_again=self._open_ask_again,
         )
         self._connect_hover(self.ai_view)
 
@@ -1463,6 +1561,8 @@ class VikunjaPopupApp:
                 "sender": f"GitHub · {what}",
                 "timestamp": item.timestamp,
                 "url": item.url,
+                # Kept so "Ask again" can rebuild the prompt.
+                "item": asdict(item),
             }
             self._proposals().append({"id": item.key, "message": message, **result})
         else:
@@ -1500,6 +1600,74 @@ class VikunjaPopupApp:
         self._save_state()
         self._update_ai_view()
         self._place_tabs()
+
+    def _open_ask_again(self, proposal_id: str) -> None:
+        proposal = self._find_proposal(proposal_id)
+        if proposal is None or proposal_id in self.asking:
+            return
+        self.ai_view.hide_panel(force=True)
+        if self.ask_again_dialog is not None:
+            self.ask_again_dialog.destroy()
+        self.ask_again_dialog = AskAgainDialog(
+            proposal, on_submit=self._ask_again, on_close=self._on_ask_again_closed
+        )
+        self.ask_again_dialog.open(Gtk.get_current_event_time())
+
+    def _on_ask_again_closed(self) -> None:
+        self.ask_again_dialog = None
+
+    def _ask_again(self, proposal_id: str, instructions: str) -> None:
+        proposal = self._find_proposal(proposal_id)
+        card = self.ai_view.panel.by_id.get(proposal_id)
+        if proposal is None or card is None or proposal_id in self.asking:
+            return
+        self.asking.add(proposal_id)
+        card.set_asking()
+        message = proposal["message"]
+        previous = {key: proposal.get(key) for key in ("summary", "related_task_ids", "actions")}
+        projects = list(self.projects)
+        tasks = {project_id: list(view.tasks) for project_id, view in self.views.items()}
+
+        def worker() -> None:
+            # Runs in a thread: no GTK calls here.
+            try:
+                if message.get("source") == "github":
+                    item = github_client.GitHubItem(**message["item"])
+                    result = ai_mail.analyze_github(
+                        self.config.ai_model, item, projects, tasks, previous, instructions
+                    )
+                else:
+                    fields = {f.name for f in dataclass_fields(mail_client.MailMessage)}
+                    mail = mail_client.MailMessage(**{k: v for k, v in message.items() if k in fields})
+                    result = ai_mail.analyze(
+                        self.config.ai_model, mail, self.config.email.address,
+                        projects, tasks, previous, instructions,
+                    )
+            except Exception as exc:
+                LOG.exception("Asking the AI again failed")
+                GLib.idle_add(self._on_asked_again, proposal_id, None, str(exc))
+            else:
+                GLib.idle_add(self._on_asked_again, proposal_id, result, None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_asked_again(self, proposal_id: str, result: dict | None, error: str | None) -> bool:
+        self.asking.discard(proposal_id)
+        proposal = self._find_proposal(proposal_id)
+        if proposal is None:
+            return False  # discarded meanwhile
+        if result is None:
+            # Keep the old proposal (and the user's edits in the card).
+            card = self.ai_view.panel.by_id.get(proposal_id)
+            if card is not None:
+                card.show_error(f"Asking again failed: {error}")
+            return False
+        # Even an answer without actions replaces the card, so the user sees
+        # the new summary and can discard it.
+        proposal.update(result)
+        self._save_state()
+        self.ai_view.panel.replace(proposal, *self._titles())
+        return False
 
     def _execute_proposal(self, card: ProposalCard, proposal_id: str, actions: list[dict]) -> None:
         proposal = self._find_proposal(proposal_id)

@@ -186,6 +186,11 @@ Active when both `ai_model` and an IMAP server are set.
   comments and the reply can be edited. Nothing happens until you click
   "Execute selected"; `×` discards the card. Actions that fail stay on the card
   with the error, so you can try again.
+- "Ask again…" on a card opens a box in the middle of the screen where you can
+  give the AI additional instructions, such as "Please write in English" or
+  "It should be a new task". "Send to AI" (or Ctrl+Enter) sends the email
+  together with the previous proposal and your instructions back to the AI;
+  its new answer replaces the card. If that fails, the old proposal stays.
 - Replies go to the sender (or `Reply-To`) from your `address` via SMTP, as an
   answer in the same thread with the original quoted. They are not copied to a
   Sent folder.
@@ -217,7 +222,8 @@ Active when both `ai_model` and a GitHub token are set.
   comment or description. New tasks go to the **ToDo** project, as with
   emails.
 - Proposals appear in the **Inbox** tab like the email ones; the card title
-  links to GitHub. GitHub items get no reply action.
+  links to GitHub. GitHub items get no reply action. "Ask again…" works the
+  same way (not for cards stored by an older version of the app).
 - An issue or pull request that is closed or unassigned is forgotten, so it is
   handled again if it is assigned to you again later.
 - At most 10 items are handled per refresh; if the AI cannot be reached they

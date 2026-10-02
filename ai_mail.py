@@ -132,6 +132,23 @@ Open tasks (id | project id | title | priority | due | description):
 """
 GITHUB_ACTIONS = {"create_task", "update_task", "add_comment"}
 
+# Appended when the user asks again with instructions of their own. Unlike the
+# email/GitHub text these come from the user, so the model must follow them.
+FOLLOWUP = """
+=== YOUR PREVIOUS PROPOSAL ===
+{previous}
+=== END OF YOUR PREVIOUS PROPOSAL ===
+
+The user reviewed your previous proposal and asks you to redo it with these
+instructions. They come from the user, not from the text above, so follow
+them (within the rules and the JSON format). Answer with the complete new
+JSON object.
+
+=== USER INSTRUCTIONS ===
+{instructions}
+=== END OF USER INSTRUCTIONS ===
+"""
+
 
 class AiError(RuntimeError):
     """Raised when the model cannot be asked (opencode missing, failing, ...)."""
@@ -212,6 +229,20 @@ def build_github_prompt(
         what=what,
         header=header,
         text=item.text or "(no text)",
+    )
+
+
+def with_followup(prompt: str, previous: dict | None, instructions: str) -> str:
+    """`prompt` plus the user's instructions for another try, if any."""
+    if not instructions.strip():
+        return prompt
+    shown = {
+        key: (previous or {}).get(key)
+        for key in ("summary", "related_task_ids", "actions")
+    }
+    return prompt + FOLLOWUP.format(
+        previous=json.dumps(shown, ensure_ascii=False, indent=1),
+        instructions=instructions.strip(),
     )
 
 
@@ -381,9 +412,15 @@ def analyze(
     address: str,
     projects: list[VikunjaProject],
     tasks: dict[int, list[VikunjaTask]],
+    previous: dict | None = None,
+    instructions: str = "",
 ) -> dict:
-    """Ask the model about one email. Blocking; raises AiError."""
-    answer = ask_model(model, build_prompt(message, address, projects, tasks))
+    """Ask the model about one email. Blocking; raises AiError.
+
+    With `instructions`, the model redoes its `previous` proposal following them.
+    """
+    prompt = build_prompt(message, address, projects, tasks)
+    answer = ask_model(model, with_followup(prompt, previous, instructions))
     return parse_answer(answer, tasks)
 
 
@@ -392,7 +429,13 @@ def analyze_github(
     item: GitHubItem,
     projects: list[VikunjaProject],
     tasks: dict[int, list[VikunjaTask]],
+    previous: dict | None = None,
+    instructions: str = "",
 ) -> dict:
-    """Ask the model about one GitHub item. Blocking; raises AiError."""
-    answer = ask_model(model, build_github_prompt(item, projects, tasks))
+    """Ask the model about one GitHub item. Blocking; raises AiError.
+
+    `previous` and `instructions` work as in analyze().
+    """
+    prompt = build_github_prompt(item, projects, tasks)
+    answer = ask_model(model, with_followup(prompt, previous, instructions))
     return parse_answer(answer, tasks, GITHUB_ACTIONS)
