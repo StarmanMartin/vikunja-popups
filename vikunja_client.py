@@ -137,6 +137,17 @@ class VikunjaClient:
             if int(item.get("id") or 0) > 0 and not item.get("is_archived", False)
         ]
 
+    def create_project(self, title: str) -> VikunjaProject:
+        response = self._request("POST", "/projects", json={"title": title})
+        return VikunjaProject.from_api(response.json())
+
+    def ensure_project(self, title: str) -> VikunjaProject:
+        """The project called `title` (case-insensitive), created when missing."""
+        for project in self.get_projects():
+            if project.title.strip().casefold() == title.casefold():
+                return project
+        return self.create_project(title)
+
     def get_project_tasks(
         self,
         project_id: int | str,

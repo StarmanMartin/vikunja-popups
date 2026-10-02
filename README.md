@@ -179,6 +179,8 @@ Active when both `ai_model` and an IMAP server are set.
   should be created or changed (title, priority, due date, done, text added
   to the description, a comment), and whether it needs an answer, which it
   drafts.
+- New tasks always go to a project called **ToDo**. If you don't have one,
+  it is created the first time such a task is executed.
 - Emails with proposals get a card in the purple **Inbox** tab at the top of
   the tab column. Each proposed action has a checkbox; task titles, texts,
   comments and the reply can be edited. Nothing happens until you click
@@ -212,7 +214,8 @@ Active when both `ai_model` and a GitHub token are set.
 - Each item goes to the AI together with your projects and open tasks. The AI
   says whether it belongs to an existing task (a comment, and changes to the
   task if needed) or needs a new task. The link to GitHub goes into the
-  comment or description.
+  comment or description. New tasks go to the **ToDo** project, as with
+  emails.
 - Proposals appear in the **Inbox** tab like the email ones; the card title
   links to GitHub. GitHub items get no reply action.
 - An issue or pull request that is closed or unassigned is forgotten, so it is

@@ -158,6 +158,8 @@ HIDE_DELAY_MS = 300
 MAIL_BATCH = 10
 # The same for GitHub items (assigned issues/PRs, new comments on own PRs).
 GITHUB_BATCH = 10
+# AI-proposed tasks are always created in this project (created if missing).
+TODO_PROJECT = "ToDo"
 
 
 def priority_class(priority: int) -> str | None:
@@ -686,7 +688,7 @@ def text_of(view: Gtk.TextView) -> str:
 def describe_action(action: dict, task_titles: dict[int, str], project_titles: dict[int, str]) -> str:
     kind = action["type"]
     if kind == "create_task":
-        text = f"Create a task in {project_titles.get(action['project_id'], action['project_id'])}"
+        text = f"Create a task in {TODO_PROJECT}"
         extras = []
         if action.get("priority"):
             extras.append(f"priority {action['priority']}")
@@ -1526,8 +1528,10 @@ class VikunjaPopupApp:
         # Runs in a thread: no GTK calls here.
         kind = action["type"]
         if kind == "create_task":
+            # Always the ToDo project; proposals stored before that rule may
+            # still carry a project_id, which is ignored.
             self.client.create_task(
-                action["project_id"],
+                self.client.ensure_project(TODO_PROJECT).id,
                 action["title"],
                 description=text_to_html(action.get("description", "")),
                 priority=action.get("priority", 0),

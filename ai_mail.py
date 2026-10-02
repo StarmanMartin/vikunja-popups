@@ -46,7 +46,7 @@ Reply with one JSON object and nothing else (no Markdown, no code fence):
   "summary": "one or two sentences: what the email is about and what you propose",
   "related_task_ids": [ids of existing tasks the email belongs to],
   "actions": [zero or more of:
-    {{"type": "create_task", "project_id": <project id>, "title": "...", "description": "...", "priority": <0-5>, "due_date": "<ISO 8601 with time zone, or null>"}},
+    {{"type": "create_task", "title": "...", "description": "...", "priority": <0-5>, "due_date": "<ISO 8601 with time zone, or null>"}},
     {{"type": "update_task", "task_id": <task id>, "changes": {{only the fields to change: "title": "...", "priority": <0-5>, "due_date": "<ISO 8601>", "done": true, "append_description": "text added to the description"}}}},
     {{"type": "add_comment", "task_id": <task id>, "comment": "..."}},
     {{"type": "reply", "body": "the complete answer, without subject line"}}
@@ -54,7 +54,8 @@ Reply with one JSON object and nothing else (no Markdown, no code fence):
 }}
 
 Rules:
-- Use only project ids and task ids from the lists below.
+- Use only task ids from the list below. New tasks always go to the user's
+  "ToDo" project; the other projects are only context for existing tasks.
 - Propose only actions that are clearly useful. Newsletters, notifications,
   advertising and spam get an empty action list.
 - Priorities: 0 unset, 1 low, 2 medium, 3 high, 4 urgent, 5 do now.
@@ -89,22 +90,23 @@ Decide whether it belongs to one of the existing open tasks or needs a new task:
   says what is new, with the GitHub link. Add "update_task" only if the task
   itself must change (for example a higher priority, a due date, or done when
   the work is finished).
-- Otherwise: propose one "create_task" in the best fitting project, with the
-  GitHub link in the description.
+- Otherwise: propose one "create_task" with the GitHub link in the
+  description.
 
 Reply with one JSON object and nothing else (no Markdown, no code fence):
 {{
   "summary": "one or two sentences: what happened on GitHub and what you propose",
   "related_task_ids": [ids of existing tasks it belongs to],
   "actions": [one or more of:
-    {{"type": "create_task", "project_id": <project id>, "title": "...", "description": "...", "priority": <0-5>, "due_date": "<ISO 8601 with time zone, or null>"}},
+    {{"type": "create_task", "title": "...", "description": "...", "priority": <0-5>, "due_date": "<ISO 8601 with time zone, or null>"}},
     {{"type": "update_task", "task_id": <task id>, "changes": {{only the fields to change: "title": "...", "priority": <0-5>, "due_date": "<ISO 8601>", "done": true, "append_description": "text added to the description"}}}},
     {{"type": "add_comment", "task_id": <task id>, "comment": "..."}}
   ]
 }}
 
 Rules:
-- Use only project ids and task ids from the lists below.
+- Use only task ids from the list below. New tasks always go to the user's
+  "ToDo" project; the other projects are only context for existing tasks.
 - Always propose either actions on an existing task or a new task. Only
   automated messages that need nothing from the user (CI results, bot
   reports) get an empty action list.
@@ -267,7 +269,6 @@ def _priority(value: object) -> int | None:
 
 def _clean_action(
     action: object,
-    project_ids: set[int],
     task_ids: set[int],
     allowed: set[str] | None,
 ) -> dict | None:
@@ -279,16 +280,13 @@ def _clean_action(
         return None
 
     if kind == "create_task":
-        try:
-            project_id = int(action.get("project_id"))
-        except (TypeError, ValueError):
-            return None
+        # New tasks always go to the ToDo project, so the model's project
+        # choice (if any) is ignored.
         title = str(action.get("title") or "").strip()
-        if project_id not in project_ids or not title:
+        if not title:
             return None
         return {
             "type": kind,
-            "project_id": project_id,
             "title": title,
             "description": str(action.get("description") or "").strip(),
             "priority": _priority(action.get("priority")) or 0,
@@ -330,7 +328,6 @@ def _clean_action(
 
 def parse_answer(
     answer: str,
-    projects: list[VikunjaProject],
     tasks: dict[int, list[VikunjaTask]],
     allowed: set[str] | None = None,
 ) -> dict:
@@ -353,7 +350,6 @@ def parse_answer(
             "error": "The AI answer could not be read.",
         }
 
-    project_ids = {project.id for project in projects}
     task_ids = {task.id for project_tasks in tasks.values() for task in project_tasks}
     related = []
     for value in data.get("related_task_ids") or []:
@@ -366,7 +362,7 @@ def parse_answer(
     actions = [
         cleaned
         for cleaned in (
-            _clean_action(action, project_ids, task_ids, allowed)
+            _clean_action(action, task_ids, allowed)
             for action in (raw_actions if isinstance(raw_actions, list) else [])
         )
         if cleaned is not None
@@ -388,7 +384,7 @@ def analyze(
 ) -> dict:
     """Ask the model about one email. Blocking; raises AiError."""
     answer = ask_model(model, build_prompt(message, address, projects, tasks))
-    return parse_answer(answer, projects, tasks)
+    return parse_answer(answer, tasks)
 
 
 def analyze_github(
@@ -399,4 +395,4 @@ def analyze_github(
 ) -> dict:
     """Ask the model about one GitHub item. Blocking; raises AiError."""
     answer = ask_model(model, build_github_prompt(item, projects, tasks))
-    return parse_answer(answer, projects, tasks, GITHUB_ACTIONS)
+    return parse_answer(answer, tasks, GITHUB_ACTIONS)
