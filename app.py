@@ -469,7 +469,16 @@ class TaskTab(Gtk.Window):
     """Small tab at the right screen edge showing a project's name."""
 
     def __init__(self, config: Config, heading: str) -> None:
-        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        # Windows will not shrink a managed (TOPLEVEL) window below ~150 px
+        # width, so the 28 px tab comes out far too wide there. POPUP windows
+        # are not managed by the window manager and keep their requested
+        # size. Linux keeps TOPLEVEL so the compositor keeps stacking and
+        # placing the tabs as before.
+        super().__init__(
+            type=Gtk.WindowType.POPUP
+            if app_control.WINDOWS
+            else Gtk.WindowType.TOPLEVEL
+        )
         self.config = config
         self.heading = heading
 
