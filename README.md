@@ -158,9 +158,49 @@ a free collection of open-source tools and libraries for Windows.
    then start **Vikunja Popups** (or use "Start app" in the settings).
 
 Re-run `install.ps1` after updating the code; it keeps the configuration and
-restarts the app if it is running. For the AI assistant, install opencode
-for Windows as well; the app finds `opencode` on the `PATH`, in
-`~\.opencode\bin` or in npm's global folder.
+restarts the app if it is running.
+
+### opencode on Windows
+
+The AI assistant needs a standalone `opencode` CLI. The CLI bundled inside
+the OpenCode desktop app does not help: it is not on the `PATH`, so the
+settings app cannot list models. The app looks for `opencode` on the
+`PATH`, in `~\.opencode\bin` and in npm's global folder.
+
+A way that needs no package manager is to put the CLI into
+`~\.opencode\bin` yourself. In PowerShell:
+
+```powershell
+$dir = "$env:TEMP\opencode-cli"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+# The metadata gives the latest version of the CLI.
+$meta = Invoke-RestMethod 'https://opencode.ai/update/api/latest/cli/npm'
+Invoke-WebRequest -Uri `
+  "https://registry.npmjs.org/@opencode/cli-windows-x64/-/cli-windows-x64-$($meta.version).tgz" `
+  -OutFile "$dir\opencode.tgz"
+tar -xzf "$dir\opencode.tgz" -C $dir
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.opencode\bin" | Out-Null
+Copy-Item "$dir\package\bin\opencode.exe" "$env:USERPROFILE\.opencode\bin\opencode.exe" -Force
+& "$env:USERPROFILE\.opencode\bin\opencode.exe" --version
+& "$env:USERPROFILE\.opencode\bin\opencode.exe" models
+```
+
+`opencode models` should list model ids such as `provider/model`. Then log in
+to a model provider with `opencode auth login` and pick the model in
+**Vikunja Popups Settings**. If the settings app was already open, close and
+reopen it: it loads the model list only at startup.
+
+Keep the CLI on the same major version as the OpenCode desktop app, if you
+use it. Both share the data directory `~\.local\share\opencode`; a CLI of an
+older generation cannot read the newer database and fails with
+
+```text
+Database is not empty and has no session table
+```
+
+If that happens, install the CLI version that matches the desktop app
+(v2: `curl -fsSL https://opencode.ai/v2/install | bash` from MSYS2, or the
+npm tarball as above).
 
 On Windows the files live in other places:
 
