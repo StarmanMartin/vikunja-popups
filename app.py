@@ -137,8 +137,13 @@ CSS = b"""
 .task-tab.ai-tab {
     background: rgba(86, 52, 140, 0.96);
 }
-.proposal-text, .proposal-card check label {
+.proposal-text {
     color: #e8e8e8;
+}
+/* The heading of each proposed action (the check button's label). */
+.proposal-card checkbutton label {
+    color: #ffffff;
+    font-weight: bold;
 }
 /* The scrolling container of the proposal panel paints nothing itself. */
 #proposal-panel-window scrolledwindow, #proposal-panel-window viewport {
