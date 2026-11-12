@@ -233,17 +233,21 @@ def place_popup_window(
     config: Config,
     top: int = 0,
     right: int | None = None,
+    margin_top: int | None = None,
 ) -> None:
-    """Position a shown popup `top` pixels below the top margin and `right`
-    pixels from the right screen edge (default: `config.margin_right`).
+    """Position a shown popup `top` pixels below the top margin (default:
+    `config.margin_top`) and `right` pixels from the right screen edge
+    (default: `config.margin_right`).
 
     Call after show_all(): before that, GTK reports a placeholder size.
     """
     if right is None:
         right = config.margin_right
+    if margin_top is None:
+        margin_top = config.margin_top
 
     if GtkLayerShell is not None:
-        GtkLayerShell.set_margin(window, GtkLayerShell.Edge.TOP, config.margin_top + top)
+        GtkLayerShell.set_margin(window, GtkLayerShell.Edge.TOP, margin_top + top)
         GtkLayerShell.set_margin(window, GtkLayerShell.Edge.RIGHT, right)
         return
 
@@ -252,7 +256,7 @@ def place_popup_window(
     monitor = display.get_primary_monitor() or display.get_monitor(0)
     geometry = monitor.get_workarea()  # excludes the GNOME top bar
     x = geometry.x + geometry.width - width - right
-    y = geometry.y + config.margin_top + top
+    y = geometry.y + margin_top + top
     window.move(x, y)
 
 
@@ -423,8 +427,9 @@ class PanelWindow(Gtk.Window):
 
     def place(self) -> None:
         self._placed_size = self.get_size()
-        # Every panel opens at the same height, whichever tab it belongs to.
-        place_popup_window(self, self.config, right=TAB_WIDTH)
+        # Every panel opens at the top of the work area, whichever tab it
+        # belongs to; the tabs' top margin doesn't apply to panels.
+        place_popup_window(self, self.config, right=TAB_WIDTH, margin_top=0)
 
     def _on_size_allocate(self, *_args) -> None:
         if self.get_mapped() and self.get_size() != self._placed_size:
@@ -1008,7 +1013,7 @@ class ProposalPanel(PanelWindow):
     def _fit(self) -> None:
         display = Gdk.Display.get_default()
         monitor = display.get_primary_monitor() or display.get_monitor(0)
-        height = monitor.get_workarea().height - self.config.margin_top - 24
+        height = monitor.get_workarea().height - 24
         self.scroller.set_max_content_height(max(200, height))
         self.cards.show_all()
         self.resize(1, 1)

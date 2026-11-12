@@ -285,7 +285,7 @@ Restarting the application clears all dismissals.
 - `refresh_seconds`: refresh interval, minimum 10 seconds.
 - `include_done`: whether completed tasks should be displayed.
 - `popup_width`: popup width.
-- `margin_top`, `margin_right`: screen edge margins.
+- `margin_top`, `margin_right`: screen edge margins of the tabs (the task and inbox panels always start at the top of the screen).
 - `max_visible`: maximum number of task cards shown at once, per project.
 - `verify_tls`: set to `false` only for development/self-signed setups where
   you intentionally do not want certificate verification.
